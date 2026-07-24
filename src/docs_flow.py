@@ -16,7 +16,6 @@ router.message.filter(F.chat.type == "private")
 FAQ_PATH = Path(__file__).resolve().parent.parent / "config" / "faq.json"
 
 MENU = [
-    ("D_BASE", "📄 Нац. D — базовый пакет"),
     ("D_WORK", "📄 D (работа)"),
     ("D_DRIVER", "📄 D (водители)"),
     ("D_STUDENT", "📄 D (учёба)"),
@@ -83,6 +82,10 @@ async def docs_section(callback: CallbackQuery) -> None:
         await callback.answer("Раздел не найден", show_alert=True)
         return
     lines = [f"<b>{section['title']}</b>", ""]
+    if section.get("with_base"):
+        lines += [f"• {item}" for item in faq["base_items"]]
+        lines.append("")
+        lines.append("<b>Дополнительно под цель:</b>")
     lines += [f"• {item}" for item in section["items"]]
     await callback.message.edit_text(
         "\n".join(lines), reply_markup=_section_kb(faq, key),
