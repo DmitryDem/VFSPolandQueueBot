@@ -17,11 +17,14 @@ router = Router()
 FAQ_PATH = Path(__file__).resolve().parent.parent / "config" / "faq.json"
 
 MENU = [
-    ("D_WORK", "Нац. D — работа"),
-    ("D_OTHER", "Нац. D — другие цели"),
-    ("D_DRIVER", "Нац. D — водители"),
-    ("C_OTHER", "Шенген C"),
-    ("PRICES", "💰 Стоимость услуг"),
+    ("D_OTHER", "📄 Нац. виза D — документы"),
+    ("D_WORK", "📄 D (работа)"),
+    ("D_DRIVER", "📄 D (водители)"),
+    ("C_OTHER", "📄 Шенген C"),
+    ("PHOTO", "📷 Требования к фото"),
+    ("FEES", "💰 Сборы"),
+    ("SERVICES", "🧾 Доп. услуги"),
+    ("TERMS", "⏱ Сроки и порядок"),
 ]
 
 
@@ -35,8 +38,14 @@ def _owner_only(user_id: int) -> bool:
 
 
 def _menu_kb() -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text=label, callback_data=f"docs:{key}")]
-            for key, label in MENU]
+    rows, row = [], []
+    for key, label in MENU:
+        row.append(InlineKeyboardButton(text=label, callback_data=f"docs:{key}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
