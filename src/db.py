@@ -54,6 +54,8 @@ _MIGRATIONS = [
     "ALTER TABLE reports ADD COLUMN suspect INTEGER DEFAULT 0",
     # срок выданной визы в днях (NULL = не указан)
     "ALTER TABLE reports ADD COLUMN visa_days INTEGER",
+    # уточнение категории для D (Other): KARTA | STUDY | NULL
+    "ALTER TABLE reports ADD COLUMN subcategory TEXT",
 ]
 
 
@@ -88,17 +90,18 @@ def save_report(
     outcome: str | None = None,
     suspect: int = 0,
     visa_days: int | None = None,
+    subcategory: str | None = None,
 ) -> int:
     with _connect() as conn:
         cur = conn.execute(
             """INSERT INTO reports
                (user_id, username, city, visa_type, queue_date, queue_time,
                 letter_date, slots, submit_date, passport_date, outcome, suspect,
-                visa_days, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                visa_days, subcategory, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (user_id, username, city, visa_type, queue_date, queue_time,
              letter_date, slots, submit_date, passport_date, outcome, suspect,
-             visa_days, _now()),
+             visa_days, subcategory, _now()),
         )
         return cur.lastrowid
 
@@ -115,15 +118,18 @@ def update_report(
     suspect: int = 0,
     username: str | None = None,
     visa_days: int | None = None,
+    subcategory: str | None = None,
 ) -> None:
     """Обновляет анкету; username освежается при каждой правке (мог появиться/смениться)."""
     with _connect() as conn:
         conn.execute(
             """UPDATE reports SET queue_date = ?, queue_time = ?, letter_date = ?,
                slots = ?, submit_date = ?, passport_date = ?, outcome = ?,
-               suspect = ?, username = ?, visa_days = ?, updated_at = ? WHERE id = ?""",
+               suspect = ?, username = ?, visa_days = ?, subcategory = ?,
+               updated_at = ? WHERE id = ?""",
             (queue_date, queue_time, letter_date, slots, submit_date,
-             passport_date, outcome, suspect, username, visa_days, _now(), report_id),
+             passport_date, outcome, suspect, username, visa_days, subcategory,
+             _now(), report_id),
         )
 
 

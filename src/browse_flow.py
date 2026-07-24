@@ -35,9 +35,12 @@ def _city_kb() -> InlineKeyboardMarkup:
 
 
 def _visa_kb(city: str) -> InlineKeyboardMarkup:
+    from src.report_flow import topic_id
+
     rows = [
         [InlineKeyboardButton(text=label, callback_data=f"lvisa:{city}:{key}")]
         for key, label in VISA_TYPES.items()
+        if topic_id(city, key)
     ]
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="lback")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -291,10 +294,13 @@ async def _show_mine(message: Message, user_id: int) -> None:
         import json as _json
 
         slots = _json.loads(row["slots"])
+    from src.report_flow import SUBCATS
+
+    subcat = f" · 🔖 {SUBCATS[row['subcategory']]}" if row["subcategory"] else ""
     lines = [
         f"👤 <b>Ваша анкета</b> (от {created})",
         "",
-        f"🏙 {row['city']} · 📄 {VISA_TYPES[row['visa_type']]}",
+        f"🏙 {row['city']} · 📄 {VISA_TYPES[row['visa_type']]}{subcat}",
         f"⏳ В очереди: <b>{when}</b>",
         f"📬 Письмо: <b>{fmt(row['letter_date']) if row['letter_date'] else 'ещё не пришло'}</b>",
         f"📆 Даты записи: <b>{fmt_slots(slots)}</b>",

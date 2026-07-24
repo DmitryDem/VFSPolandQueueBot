@@ -92,9 +92,12 @@ def _city_kb(prefix: str) -> InlineKeyboardMarkup:
 
 
 def _visa_kb(prefix: str, city: str) -> InlineKeyboardMarkup:
+    from src.report_flow import topic_id
+
     rows = [
         [InlineKeyboardButton(text=label, callback_data=f"{prefix}visa:{city}:{key}")]
         for key, label in VISA_TYPES.items()
+        if topic_id(city, key)
     ]
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{prefix}back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

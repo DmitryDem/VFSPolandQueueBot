@@ -29,9 +29,11 @@ VISA_TYPES = {
     "D_DRIVER": "Национальная D (Driver)",
     "D_WORK": "Национальная D (Work)",
     "D_KARTA": "Национальная D (Карта поляка)",
-    "D_STUDY": "Национальная D (Учёба)",
     "C_OTHER": "Шенген C (Other)",
 }
+
+# необязательное уточнение категории для D (Other)
+SUBCATS = {"KARTA": "Карта поляка", "STUDY": "Ученическая"}
 
 REPORT_COOLDOWN_DAYS = 14
 
@@ -49,6 +51,7 @@ BACK = "⬅️ Назад"
 class Report(StatesGroup):
     city = State()
     visa_type = State()
+    subcategory = State()
     queue_date = State()
     queue_time = State()
     letter_date = State()
@@ -202,12 +205,28 @@ def city_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def visa_kb() -> InlineKeyboardMarkup:
+def visa_kb(city: str) -> InlineKeyboardMarkup:
+    # показываем только те категории, у которых есть тема в этом городе
+    # (напр. D Карта поляка — только Гродно и Лида)
     rows = [
         [InlineKeyboardButton(text=label, callback_data=f"visa:{key}")]
         for key, label in VISA_TYPES.items()
+        if topic_id(city, key)
     ]
     rows.append([back_btn("city")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def subcat_kb(city: str, current: str | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    if current:
+        rows.append(keep_btn("subcat", SUBCATS[current]))
+    # «Карта поляка» как уточнение — только там, где нет отдельной темы (кроме Гродно/Лида)
+    if not topic_id(city, "D_KARTA"):
+        rows.append([InlineKeyboardButton(text="Карта поляка", callback_data="subcat:KARTA")])
+    rows.append([InlineKeyboardButton(text="Ученическая", callback_data="subcat:STUDY")])
+    rows.append([InlineKeyboardButton(text="➡️ Без уточнения", callback_data="subcat:none")])
+    rows.append([back_btn("visa")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -256,6 +275,8 @@ def build_post_text(
 ) -> str:
     """Текст публикации в теме города."""
     lines = [f"👤 {user_label(username, first_name)}"]
+    if d.get("subcategory"):
+        lines.append(f"🔖 Категория: <b>{SUBCATS[d['subcategory']]}</b>")
     when = fmt(d["queue_date"])
     if d.get("queue_time"):
         when += f" в {d['queue_time']}"
@@ -290,6 +311,7 @@ def build_post_text_from_row(row) -> tuple[str, str, str]:
     data = {
         "city": row["city"],
         "visa_type": row["visa_type"],
+        "subcategory": row["subcategory"],
         "queue_date": row["queue_date"],
         "queue_time": row["queue_time"],
         "letter_date": row["letter_date"],
@@ -332,10 +354,22 @@ async def ask_city(message: Message, state: FSMContext, edit: bool = False, gree
 async def ask_visa(message: Message, state: FSMContext, edit: bool = False) -> None:
     data = await state.get_data()
     await state.set_state(Report.visa_type)
-    kb = visa_kb()
-    if data.get("visa_type"):
+    kb = visa_kb(data["city"])
+    if data.get("visa_type") and topic_id(data["city"], data["visa_type"]):
         kb.inline_keyboard.insert(-1, keep_btn("visa", VISA_TYPES[data["visa_type"]]))
     await _render(message, f"Город: <b>{data['city']}</b>\n\nКакой тип визы?", kb, edit)
+
+
+async def ask_subcategory(message: Message, state: FSMContext, edit: bool = False) -> None:
+    data = await state.get_data()
+    await state.set_state(Report.subcategory)
+    await _render(
+        message,
+        f"Город: <b>{data['city']}</b>, тип: <b>{VISA_TYPES['D_OTHER']}</b>\n\n"
+        "Уточните категорию (необязательно):",
+        subcat_kb(data["city"], data.get("subcategory")),
+        edit,
+    )
 
 
 async def ask_queue_date(message: Message, state: FSMContext, edit: bool = False) -> None:
@@ -344,7 +378,7 @@ async def ask_queue_date(message: Message, state: FSMContext, edit: bool = False
     rows = []
     if data.get("queue_date"):
         rows.append(keep_btn("queue", fmt(data["queue_date"])))
-    rows.append([back_btn("visa")])
+    rows.append([back_btn("subcat" if data.get("visa_type") == "D_OTHER" else "visa")])
     await _render(
         message,
         f"Город: <b>{data['city']}</b>\n"
@@ -616,6 +650,7 @@ async def edit_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(
         city=row["city"],
         visa_type=row["visa_type"],
+        subcategory=row["subcategory"],
         queue_date=row["queue_date"],
         queue_time=row["queue_time"],
         letter_date=row["letter_date"],
@@ -686,9 +721,20 @@ async def cmd_funnel(message: Message, command: CommandObject) -> None:
 async def keep_value(callback: CallbackQuery, state: FSMContext) -> None:
     step = callback.data.split(":", 1)[1]
     data = await state.get_data()
+    # «Оставить тип D (Other)» ведёт к шагу уточнения категории, иначе — к дате
+    if step == "visa" and data.get("visa_type"):
+        if data["visa_type"] == "D_OTHER":
+            await ask_subcategory(callback.message, state, edit=True)
+        else:
+            await ask_queue_date(callback.message, state, edit=True)
+        await callback.answer()
+        return
+    if step == "subcat":
+        await ask_queue_date(callback.message, state, edit=True)
+        await callback.answer()
+        return
     forward = {
         "city": ("city", ask_visa),
-        "visa": ("visa_type", ask_queue_date),
         "queue": ("queue_date", ask_queue_time),
         "time": ("queue_time", ask_letter_date),
         "letter": ("letter_date", ask_slots),
@@ -731,6 +777,8 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
         await ask_city(callback.message, state, edit=True)
     elif target == "visa" and data.get("city"):
         await ask_visa(callback.message, state, edit=True)
+    elif target == "subcat" and data.get("visa_type") == "D_OTHER":
+        await ask_subcategory(callback.message, state, edit=True)
     elif target == "queue" and data.get("visa_type"):
         await ask_queue_date(callback.message, state, edit=True)
     elif target == "time" and data.get("queue_date"):
@@ -774,8 +822,22 @@ async def pick_city(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(Report.visa_type, F.data.startswith("visa:"))
 async def pick_visa(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(visa_type=callback.data.split(":", 1)[1])
+    visa = callback.data.split(":", 1)[1]
+    await state.update_data(visa_type=visa)
     db.log_event(callback.from_user.id, "visa")
+    if visa == "D_OTHER":
+        await ask_subcategory(callback.message, state, edit=True)
+    else:
+        await state.update_data(subcategory=None)
+        await ask_queue_date(callback.message, state, edit=True)
+    await callback.answer()
+
+
+@router.callback_query(Report.subcategory, F.data.startswith("subcat:"))
+async def pick_subcategory(callback: CallbackQuery, state: FSMContext) -> None:
+    value = callback.data.split(":", 1)[1]
+    sub = value if value in SUBCATS else None
+    await state.update_data(subcategory=sub)
     await ask_queue_date(callback.message, state, edit=True)
     await callback.answer()
 
@@ -987,10 +1049,15 @@ async def show_summary(message: Message, state: FSMContext, edit: bool = False) 
     when = fmt(data["queue_date"])
     if data.get("queue_time"):
         when += f" в {data['queue_time']}"
+    subcat_line = (
+        f"🔖 Категория: <b>{SUBCATS[data['subcategory']]}</b>\n"
+        if data.get("subcategory") else ""
+    )
     text = (
         "Проверьте данные:\n\n"
         f"🏙 Город: <b>{data['city']}</b>\n"
         f"📄 Тип визы: <b>{VISA_TYPES[data['visa_type']]}</b>\n"
+        f"{subcat_line}"
         f"⏳ Встал(а) в очередь: <b>{when}</b>\n"
         f"📬 Письмо-приглашение: <b>{fmt(data.get('letter_date'))}</b>\n"
         f"📆 Доступные даты записи: <b>{fmt_slots(data.get('slots'))}</b>\n"
@@ -1038,6 +1105,7 @@ async def confirm_yes(callback: CallbackQuery, state: FSMContext) -> None:
         outcome=data.get("outcome"),
         suspect=suspect,
         visa_days=data.get("visa_days"),
+        subcategory=data.get("subcategory"),
     )
     db.log_event(user.id, "saved_new")
     if suspect:
@@ -1216,6 +1284,7 @@ async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> N
         suspect=suspect,
         username=user.username,
         visa_days=data.get("visa_days"),
+        subcategory=data.get("subcategory"),
     )
     if suspect and not (old["suspect"] or 0):
         await _notify_admin_suspect(callback.bot, editing_id, data, user)
