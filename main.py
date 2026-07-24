@@ -96,6 +96,7 @@ async def main() -> None:
             BotCommand(command="list", description="Анкеты по городу"),
             BotCommand(command="stats", description="Статистика и прогноз очереди"),
             BotCommand(command="my", description="Персональный прогноз по вашей дате"),
+            BotCommand(command="docs", description="Документы, сборы, порядок подачи"),
             BotCommand(command="cancel", description="Отменить текущую анкету"),
         ],
         scope=BotCommandScopeAllPrivateChats(),

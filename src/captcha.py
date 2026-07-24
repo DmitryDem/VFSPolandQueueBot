@@ -83,7 +83,8 @@ async def on_captcha_click(callback: CallbackQuery) -> None:
             "Подсказки:\n"
             "• Темы городов — витрины статистики, писать в них может только бот.\n"
             "• Анкета: кнопка ниже, команда /report или кнопки под сообщениями в темах.\n"
-            "• Статистика и прогноз: /stats и /my.",
+            "• Статистика и прогноз: /stats и /my.\n"
+            "• Документы, сборы, порядок подачи: /docs.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     # deep-link, а не callback: до первого сообщения пользователя бот не
@@ -91,6 +92,9 @@ async def on_captcha_click(callback: CallbackQuery) -> None:
                     # по ссылке отправляет /start от имени пользователя и открывает диалог
                     [InlineKeyboardButton(
                         text="📝 Заполнить анкету", url=f"https://t.me/{me.username}?start=go"
+                    )],
+                    [InlineKeyboardButton(
+                        text="📋 Документы и сборы", url=f"https://t.me/{me.username}?start=docs"
                     )],
                     [InlineKeyboardButton(text="➡️ Перейти в группу", url=GROUP_LINK)],
                 ]

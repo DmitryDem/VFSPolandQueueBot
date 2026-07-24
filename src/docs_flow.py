@@ -1,18 +1,17 @@
-"""Справочник «Документы и цены» (/docs).
+"""Справочник «Документы и цены» (/docs) — доступен всем в личке с ботом.
 
-Пока доступен только владельцу (контент на вычитке); после проверки
-достаточно убрать проверку _owner_only, чтобы открыть всем.
 Контент — config/faq.json (правится без изменения кода).
 """
 import json
-import os
 from pathlib import Path
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 router = Router()
+router.message.filter(F.chat.type == "private")
 
 FAQ_PATH = Path(__file__).resolve().parent.parent / "config" / "faq.json"
 
@@ -27,14 +26,11 @@ MENU = [
     ("TERMS", "⏱ Сроки и порядок"),
 ]
 
+TITLE = "📋 <b>Документы, сборы и порядок подачи</b>\nВыберите раздел:"
+
 
 def _faq() -> dict:
     return json.loads(FAQ_PATH.read_text("utf-8"))
-
-
-def _owner_only(user_id: int) -> bool:
-    admin = os.environ.get("ADMIN_CHAT_ID")
-    return bool(admin) and user_id == int(admin)
 
 
 def _menu_kb() -> InlineKeyboardMarkup:
@@ -58,34 +54,25 @@ def _section_kb(faq: dict, key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-@router.message(Command("docs"), F.chat.type == "private")
+@router.message(Command("docs"))
 async def cmd_docs(message: Message) -> None:
-    if not _owner_only(message.from_user.id):
-        return  # пока не публично
-    await message.answer(
-        "📋 <b>Документы и цены — справочник</b>\n"
-        "Выберите раздел:",
-        reply_markup=_menu_kb(),
-    )
+    await message.answer(TITLE, reply_markup=_menu_kb())
+
+
+@router.message(CommandStart(deep_link=True, magic=F.args == "docs"))
+async def docs_deeplink(message: Message, command: CommandObject, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(TITLE, reply_markup=_menu_kb())
 
 
 @router.callback_query(F.data == "docs:menu")
 async def docs_menu(callback: CallbackQuery) -> None:
-    if not _owner_only(callback.from_user.id):
-        await callback.answer()
-        return
-    await callback.message.edit_text(
-        "📋 <b>Документы и цены — справочник</b>\nВыберите раздел:",
-        reply_markup=_menu_kb(),
-    )
+    await callback.message.edit_text(TITLE, reply_markup=_menu_kb())
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("docs:"))
 async def docs_section(callback: CallbackQuery) -> None:
-    if not _owner_only(callback.from_user.id):
-        await callback.answer()
-        return
     key = callback.data.split(":", 1)[1]
     faq = _faq()
     section = faq["sections"].get(key)
