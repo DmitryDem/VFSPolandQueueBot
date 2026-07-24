@@ -294,13 +294,10 @@ async def _show_mine(message: Message, user_id: int) -> None:
         import json as _json
 
         slots = _json.loads(row["slots"])
-    from src.report_flow import SUBCATS
-
-    subcat = f" · 🔖 {SUBCATS[row['subcategory']]}" if row["subcategory"] else ""
     lines = [
         f"👤 <b>Ваша анкета</b> (от {created})",
         "",
-        f"🏙 {row['city']} · 📄 {VISA_TYPES[row['visa_type']]}{subcat}",
+        f"🏙 {row['city']} · 📄 {VISA_TYPES[row['visa_type']]}",
         f"⏳ В очереди: <b>{when}</b>",
         f"📬 Письмо: <b>{fmt(row['letter_date']) if row['letter_date'] else 'ещё не пришло'}</b>",
         f"📆 Даты записи: <b>{fmt_slots(slots)}</b>",
