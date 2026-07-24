@@ -28,6 +28,8 @@ VISA_TYPES = {
     "D_OTHER": "Национальная D (Other)",
     "D_DRIVER": "Национальная D (Driver)",
     "D_WORK": "Национальная D (Work)",
+    "D_KARTA": "Национальная D (Карта поляка)",
+    "D_STUDY": "Национальная D (Учёба)",
     "C_OTHER": "Шенген C (Other)",
 }
 
