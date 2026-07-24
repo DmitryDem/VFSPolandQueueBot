@@ -49,11 +49,13 @@ def _menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _section_kb(source_url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌐 Официальная страница VFS", url=source_url)],
-        [InlineKeyboardButton(text="⬅️ К разделам", callback_data="docs:menu")],
-    ])
+def _section_kb(faq: dict, key: str) -> InlineKeyboardMarkup:
+    rows = []
+    if key in ("FEES", "SERVICES") and faq.get("fee_url"):
+        rows.append([InlineKeyboardButton(text="💱 Актуальные сборы (VFS)", url=faq["fee_url"])])
+    rows.append([InlineKeyboardButton(text="🌐 Официальная страница VFS", url=faq["source_url"])])
+    rows.append([InlineKeyboardButton(text="⬅️ К разделам", callback_data="docs:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.message(Command("docs"), F.chat.type == "private")
@@ -93,14 +95,9 @@ async def docs_section(callback: CallbackQuery) -> None:
     lines = [f"<b>{section['title']}</b>", ""]
     lines += [f"• {item}" for item in section["items"]]
     lines.append("")
-    verified = faq.get("verified_date")
-    lines.append(
-        f"<i>{faq['disclaimer']}"
-        + (f" Сверено с сайтом VFS: {verified}." if verified else " ⚠️ Контент на вычитке.")
-        + "</i>"
-    )
+    lines.append(f"<i>{faq['disclaimer']}</i>")
     await callback.message.edit_text(
-        "\n".join(lines), reply_markup=_section_kb(faq["source_url"]),
+        "\n".join(lines), reply_markup=_section_kb(faq, key),
         disable_web_page_preview=True,
     )
     await callback.answer()
