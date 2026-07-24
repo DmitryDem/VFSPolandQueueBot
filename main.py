@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from src import stats
 from src.browse_flow import router as browse_router
 from src.captcha import router as captcha_router
+from src.docs_flow import router as docs_router
 from src.report_flow import CHAT_ID, CITIES, TOPICS, VISA_TYPES, router
 from src.stats_flow import router as stats_router
 from src.topic_logger import router as topic_router
@@ -82,6 +83,7 @@ async def main() -> None:
     )
     dp = Dispatcher()
     dp.include_router(captcha_router)
+    dp.include_router(docs_router)
     dp.include_router(browse_router)
     dp.include_router(stats_router)
     dp.include_router(router)

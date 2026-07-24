@@ -25,12 +25,14 @@ FILES = [
     "src/browse_flow.py",
     "src/captcha.py",
     "src/db.py",
+    "src/docs_flow.py",
     "src/notifier.py",
     "src/report_flow.py",
     "src/stats.py",
     "src/stats_flow.py",
     "src/topic_logger.py",
     "config/topics.json",
+    "config/faq.json",
 ]
 
 SERVICE = """\
