@@ -20,6 +20,7 @@ from src.stats_flow import router as stats_router
 from src.topic_logger import router as topic_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.getLogger("matplotlib").setLevel(logging.WARNING)  # не спамить info при построении графиков
 log = logging.getLogger("main")
 
 DAILY_SUMMARY_HOUR = 9  # локальное время ежедневной сводки
