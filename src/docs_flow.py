@@ -49,8 +49,10 @@ def _menu_kb() -> InlineKeyboardMarkup:
 
 def _section_kb(faq: dict, key: str) -> InlineKeyboardMarkup:
     rows = []
-    if key in ("FEES", "SERVICES") and faq.get("fee_url"):
+    if key == "FEES" and faq.get("fee_url"):
         rows.append([InlineKeyboardButton(text="💱 Актуальные сборы (VFS)", url=faq["fee_url"])])
+    if key == "SERVICES" and faq.get("services_url"):
+        rows.append([InlineKeyboardButton(text="💱 Тарифы на услуги (VFS)", url=faq["services_url"])])
     rows.append([InlineKeyboardButton(text="🌐 Официальная страница VFS", url=faq["source_url"])])
     rows.append([InlineKeyboardButton(text="⬅️ К разделам", callback_data="docs:menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
