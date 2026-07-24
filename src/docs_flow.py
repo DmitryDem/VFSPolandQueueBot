@@ -81,8 +81,6 @@ async def docs_section(callback: CallbackQuery) -> None:
         return
     lines = [f"<b>{section['title']}</b>", ""]
     lines += [f"• {item}" for item in section["items"]]
-    lines.append("")
-    lines.append(f"<i>{faq['disclaimer']}</i>")
     await callback.message.edit_text(
         "\n".join(lines), reply_markup=_section_kb(faq, key),
         disable_web_page_preview=True,
