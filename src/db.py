@@ -242,6 +242,18 @@ def count_reports(city: str, visa_type: str) -> int:
         ).fetchone()[0]
 
 
+def reports_near(city: str, visa_type: str, start: str, end: str) -> list[sqlite3.Row]:
+    """Анкеты с постановкой в окне дат (для «Людей рядом»), без сомнительных."""
+    with _connect() as conn:
+        return conn.execute(
+            """SELECT * FROM reports
+               WHERE city = ? AND visa_type = ? AND suspect = 0
+                 AND queue_date BETWEEN ? AND ?
+               ORDER BY queue_date, COALESCE(queue_time, '99'), id""",
+            (city, visa_type, start, end),
+        ).fetchall()
+
+
 def count_ahead(city: str, visa_type: str, queue_date: str) -> int:
     """Сколько человек с более ранней (или той же) датой постановки ещё ждут письма."""
     with _connect() as conn:

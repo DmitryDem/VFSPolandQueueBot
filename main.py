@@ -90,6 +90,7 @@ async def main() -> None:
         [
             BotCommand(command="report", description="Заполнить/дополнить анкету"),
             BotCommand(command="mine", description="Моя анкета"),
+            BotCommand(command="near", description="Люди рядом в очереди"),
             BotCommand(command="list", description="Анкеты по городу"),
             BotCommand(command="stats", description="Статистика и прогноз очереди"),
             BotCommand(command="my", description="Персональный прогноз по вашей дате"),

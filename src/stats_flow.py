@@ -196,7 +196,8 @@ async def my_from_stats(callback: CallbackQuery, state: FSMContext) -> None:
 def _manual_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✍️ Посчитать для другой даты", callback_data="mmanual")]
+            [InlineKeyboardButton(text="👥 Люди рядом", callback_data="near")],
+            [InlineKeyboardButton(text="✍️ Посчитать для другой даты", callback_data="mmanual")],
         ]
     )
 

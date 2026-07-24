@@ -1,5 +1,5 @@
-"""Просмотр анкет через бота: /list — по городу и типу визы, /mine — своя анкета."""
-from datetime import datetime
+"""Просмотр анкет через бота: /list — по городу/типу, /mine — своя, /near — люди рядом."""
+from datetime import datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
@@ -144,6 +144,122 @@ async def list_page(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+# ---------- /near: люди рядом ----------
+
+NEAR_WINDOWS = (3, 7, 14)   # окно ±дней, расширяется, пока соседей мало
+NEAR_MIN = 5                # сколько соседей считаем достаточным
+NEAR_SHOW = 12              # максимум строк в выдаче
+
+
+def _near_status(r) -> str:
+    if r["outcome"]:
+        return OUTCOME_LABELS[r["outcome"]].split()[0] + (
+            " виза" if r["outcome"] == "APPROVED" else " отказ"
+        )
+    if r["passport_date"]:
+        return f"🛂 паспорт {fmt(r['passport_date'])}"
+    if r["submit_date"]:
+        return f"📄 подал(а) {fmt(r['submit_date'])}"
+    if r["letter_date"]:
+        return f"✉️ письмо {fmt(r['letter_date'])}"
+    return "⏳ ждёт"
+
+
+def _pos_key(r) -> tuple:
+    return (r["queue_date"], r["queue_time"] or "99")
+
+
+async def _render_near(message: Message, own) -> None:
+    qd = datetime.strptime(own["queue_date"], "%Y-%m-%d").date()
+    rows, window = [], NEAR_WINDOWS[-1]
+    for w in NEAR_WINDOWS:
+        rows = db.reports_near(
+            own["city"], own["visa_type"],
+            (qd - timedelta(days=w)).isoformat(), (qd + timedelta(days=w)).isoformat(),
+        )
+        window = w
+        if sum(1 for r in rows if r["id"] != own["id"]) >= NEAR_MIN:
+            break
+
+    # свою (вдруг сомнительную) анкету гарантированно включаем
+    if not any(r["id"] == own["id"] for r in rows):
+        rows = sorted(list(rows) + [own], key=_pos_key)
+
+    # окно показа вокруг своей позиции
+    idx = next(i for i, r in enumerate(rows) if r["id"] == own["id"])
+    start = max(0, min(idx - NEAR_SHOW // 2, len(rows) - NEAR_SHOW))
+    shown = rows[start:start + NEAR_SHOW]
+
+    when_own = fmt(own["queue_date"]) + (f" в {own['queue_time']}" if own["queue_time"] else "")
+    lines = [
+        f"👥 <b>Люди рядом</b> — {own['city']}, {VISA_TYPES[own['visa_type']]}",
+        f"ваша постановка: <b>{when_own}</b>, окно ±{window} дн.",
+        "",
+    ]
+    for r in shown:
+        when = datetime.strptime(r["queue_date"], "%Y-%m-%d").strftime("%d.%m")
+        if r["queue_time"]:
+            when += f" {r['queue_time']}"
+        if r["message_id"]:
+            when = f'<a href="{post_link(r["message_id"])}">{when}</a>'
+        if r["id"] == own["id"]:
+            lines.append(f"<b>▶ {when} ← вы ({_near_status(r)})</b>")
+        else:
+            lines.append(f"{when} → {_near_status(r)}")
+    if len(rows) > len(shown):
+        lines.append(f"<i>…показаны {len(shown)} из {len(rows)} ближайших</i>")
+
+    others = [r for r in rows if r["id"] != own["id"]]
+    with_letter = [r for r in others if r["letter_date"]]
+    lines.append("")
+    if others:
+        summary = f"Из {len(others)} соседей письмо у <b>{len(with_letter)}</b>"
+        if with_letter:
+            waits = sorted(
+                (datetime.strptime(r["letter_date"], "%Y-%m-%d")
+                 - datetime.strptime(r["queue_date"], "%Y-%m-%d")).days
+                for r in with_letter
+            )
+            rng = f"{waits[0]}" if waits[0] == waits[-1] else f"{waits[0]}–{waits[-1]}"
+            summary += f" (ожидание у них: {rng} дн.)"
+        lines.append(summary)
+        earlier_waiting = sum(
+            1 for r in others if _pos_key(r) < _pos_key(own) and not r["letter_date"]
+        )
+        if earlier_waiting and not own["letter_date"]:
+            lines.append(
+                f"⚠️ <i>{earlier_waiting} вставших раньше вас без письма — возможно, "
+                "они просто не обновили анкету.</i>"
+            )
+    else:
+        lines.append("Соседей по датам пока нет — вы первопроходец в этом окне.")
+    await message.answer("\n".join(lines), disable_web_page_preview=True)
+
+
+@router.message(Command("near"), F.chat.type == "private")
+async def cmd_near(message: Message) -> None:
+    row = db.find_latest(message.from_user.id)
+    if row is None:
+        await message.answer(
+            "«Люди рядом» работает от вашей анкеты, а её пока нет. Заполните — займёт минуту.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📝 Заполнить анкету", callback_data="go:report")]
+            ]),
+        )
+        return
+    await _render_near(message, row)
+
+
+@router.callback_query(F.data == "near")
+async def near_button(callback: CallbackQuery) -> None:
+    row = db.find_latest(callback.from_user.id)
+    if row is None:
+        await callback.answer("Сначала заполните анкету: /report", show_alert=True)
+        return
+    await _render_near(callback.message, row)
+    await callback.answer()
+
+
 # ---------- /mine ----------
 
 @router.message(Command("mine"), F.chat.type == "private")
@@ -193,9 +309,12 @@ async def _show_mine(message: Message, user_id: int) -> None:
             text="👀 Открыть публикацию", url=post_link(row["message_id"])
         )])
     buttons.append([InlineKeyboardButton(text="✏️ Дополнить / исправить", callback_data="mine:edit")])
-    buttons.append([InlineKeyboardButton(
-        text=f"📄 Анкеты: {row['city']}", callback_data=f"lvisa:{row['city']}:{row['visa_type']}"
-    )])
+    buttons.append([
+        InlineKeyboardButton(text="👥 Люди рядом", callback_data="near"),
+        InlineKeyboardButton(
+            text=f"📄 Анкеты: {row['city']}", callback_data=f"lvisa:{row['city']}:{row['visa_type']}"
+        ),
+    ])
     await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
