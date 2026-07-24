@@ -1,0 +1,18 @@
+{
+  "chat_id": -1003983835902,
+  "service_topics": {
+    "general": 2,
+    "stats": 204
+  },
+  "cities": {
+    "Гомель": { "D_OTHER": 9, "D_DRIVER": 11, "D_WORK": 4, "C_OTHER": 16 },
+    "Минск": { "D_OTHER": 26, "D_DRIVER": 28, "D_WORK": 103, "C_OTHER": 30 },
+    "Могилев": { "D_OTHER": 32, "D_DRIVER": 34, "D_WORK": 106, "C_OTHER": 36 },
+    "Барановичи": { "D_OTHER": 38, "D_DRIVER": 40, "D_WORK": 109, "C_OTHER": 42 },
+    "Пинск": { "D_OTHER": 44, "D_DRIVER": 46, "D_WORK": 112, "C_OTHER": 56 },
+    "Брест": { "D_OTHER": 57, "D_DRIVER": 58, "D_WORK": 115, "C_OTHER": 59 },
+    "Гродно": { "D_OTHER": 60, "D_DRIVER": 61, "D_WORK": 118, "C_OTHER": 62 },
+    "Лида": { "D_OTHER": 63, "D_DRIVER": 64, "D_WORK": 121, "C_OTHER": 48 },
+    "Витебск": { "D_OTHER": 50, "D_DRIVER": 52, "D_WORK": 124, "C_OTHER": 54 }
+  }
+}
