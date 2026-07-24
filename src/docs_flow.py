@@ -16,9 +16,12 @@ router.message.filter(F.chat.type == "private")
 FAQ_PATH = Path(__file__).resolve().parent.parent / "config" / "faq.json"
 
 MENU = [
-    ("D_OTHER", "📄 Нац. виза D — документы"),
+    ("D_BASE", "📄 Нац. D — базовый пакет"),
     ("D_WORK", "📄 D (работа)"),
     ("D_DRIVER", "📄 D (водители)"),
+    ("D_STUDENT", "📄 D (учёба)"),
+    ("D_KARTA", "📄 D (Карта поляка)"),
+    ("D_OTHER", "📄 D (иные цели)"),
     ("C_OTHER", "📄 Шенген C"),
     ("PHOTO", "📷 Требования к фото"),
     ("FEES", "💰 Сборы"),
