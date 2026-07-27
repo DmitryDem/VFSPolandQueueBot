@@ -156,19 +156,60 @@ async def _ask_my_date(message: Message, state: FSMContext, city: str, visa: str
     )
 
 
-async def _my_prefilled(message: Message, state: FSMContext, user_id: int, city: str, visa: str) -> None:
-    """Общий вход для кнопок «Мой прогноз».
+def _report_choice_kb(rows, action: str) -> InlineKeyboardMarkup:
+    """Список анкет пользователя для выбора (мульти-режим): action = 'myr' | 'nearr'."""
+    kb = []
+    for r in rows:
+        lbl = f"{r['label']} · " if r["label"] else ""
+        tail = "" if not r["letter_date"] else " ✉️"
+        kb.append([InlineKeyboardButton(
+            text=f"{lbl}{r['city']}, {VISA_TYPES[r['visa_type']].split('(')[0].strip()}{tail}",
+            callback_data=f"{action}:{r['id']}",
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
 
-    Прогноз привязан к анкете пользователя: если она есть (и письмо ещё не
-    пришло) — показываем её, из какой бы темы кнопку ни нажали. Город и
-    категория анкеты видны в ответе. Без анкеты — ручной ввод даты для
-    города/категории темы.
-    """
-    row = db.find_latest(user_id)
-    if row:
-        await _forecast_from_report(message, row)
+
+async def _forecast_entry(message: Message, state: FSMContext, user_id: int,
+                          city: str | None = None, visa: str | None = None) -> None:
+    """Вход в «Мой прогноз»: 0 анкет → ручной ввод; 1 → сразу; >1 (мульти) → выбор."""
+    from src.report_flow import MULTI_REPORTS
+
+    rows = db.reports_by_user(user_id) if MULTI_REPORTS else (
+        [db.find_latest(user_id)] if db.find_latest(user_id) else []
+    )
+    rows = [r for r in rows if r]
+    if not rows:
+        if city and visa:
+            await _ask_my_date(message, state, city, visa)
+        else:
+            await message.answer(
+                "Персональный прогноз. В каком городе вы становились в очередь?",
+                reply_markup=_city_kb("m"),
+            )
         return
-    await _ask_my_date(message, state, city, visa)
+    if len(rows) == 1:
+        await _forecast_from_report(message, rows[0])
+        return
+    await message.answer(
+        "У вас несколько анкет. По какой посчитать прогноз?",
+        reply_markup=_report_choice_kb(rows, "myr"),
+    )
+
+
+@router.callback_query(F.data.startswith("myr:"))
+async def my_report_pick(callback: CallbackQuery) -> None:
+    rid = int(callback.data.split(":", 1)[1])
+    row = db.get_report(rid)
+    if row is None or row["user_id"] != callback.from_user.id:
+        await callback.answer("Анкета не найдена", show_alert=True)
+        return
+    await _forecast_from_report(callback.message, row)
+    await callback.answer()
+
+
+async def _my_prefilled(message: Message, state: FSMContext, user_id: int, city: str, visa: str) -> None:
+    """Общий вход для кнопок «Мой прогноз» (из тем/под /stats)."""
+    await _forecast_entry(message, state, user_id, city, visa)
 
 
 @router.message(CommandStart(deep_link=True, magic=F.args.startswith("m_")))
@@ -233,14 +274,7 @@ async def _forecast_from_report(message: Message, row) -> None:
 @router.message(Command("my"))
 async def cmd_my(message: Message, state: FSMContext) -> None:
     await state.clear()
-    row = db.find_latest(message.from_user.id)
-    if row:
-        await _forecast_from_report(message, row)
-        return
-    await message.answer(
-        "Персональный прогноз. В каком городе вы становились в очередь?",
-        reply_markup=_city_kb("m"),
-    )
+    await _forecast_entry(message, state, message.from_user.id)
 
 
 @router.callback_query(F.data == "mmanual")

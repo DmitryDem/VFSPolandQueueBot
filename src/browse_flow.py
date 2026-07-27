@@ -239,10 +239,25 @@ async def _render_near(message: Message, own) -> None:
     await message.answer("\n".join(lines), disable_web_page_preview=True)
 
 
-@router.message(Command("near"), F.chat.type == "private")
-async def cmd_near(message: Message) -> None:
-    row = db.find_latest(message.from_user.id)
-    if row is None:
+def _near_choice_kb(rows) -> InlineKeyboardMarkup:
+    kb = []
+    for r in rows:
+        lbl = f"{r['label']} · " if r["label"] else ""
+        kb.append([InlineKeyboardButton(
+            text=f"{lbl}{r['city']}, {VISA_TYPES[r['visa_type']].split('(')[0].strip()}",
+            callback_data=f"nearr:{r['id']}",
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+async def _near_entry(message: Message, user_id: int) -> None:
+    from src.report_flow import MULTI_REPORTS
+
+    rows = db.reports_by_user(user_id) if MULTI_REPORTS else (
+        [db.find_latest(user_id)] if db.find_latest(user_id) else []
+    )
+    rows = [r for r in rows if r]
+    if not rows:
         await message.answer(
             "«Люди рядом» работает от вашей анкеты, а её пока нет. Заполните — займёт минуту.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -250,14 +265,32 @@ async def cmd_near(message: Message) -> None:
             ]),
         )
         return
-    await _render_near(message, row)
+    if len(rows) == 1:
+        await _render_near(message, rows[0])
+        return
+    await message.answer(
+        "У вас несколько анкет. Для какой показать людей рядом?",
+        reply_markup=_near_choice_kb(rows),
+    )
+
+
+@router.message(Command("near"), F.chat.type == "private")
+async def cmd_near(message: Message) -> None:
+    await _near_entry(message, message.from_user.id)
 
 
 @router.callback_query(F.data == "near")
 async def near_button(callback: CallbackQuery) -> None:
-    row = db.find_latest(callback.from_user.id)
-    if row is None:
-        await callback.answer("Сначала заполните анкету: /report", show_alert=True)
+    await _near_entry(callback.message, callback.from_user.id)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("nearr:"))
+async def near_report_pick(callback: CallbackQuery) -> None:
+    rid = int(callback.data.split(":", 1)[1])
+    row = db.get_report(rid)
+    if row is None or row["user_id"] != callback.from_user.id:
+        await callback.answer("Анкета не найдена", show_alert=True)
         return
     await _render_near(callback.message, row)
     await callback.answer()
