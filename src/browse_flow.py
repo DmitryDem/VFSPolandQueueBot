@@ -309,25 +309,36 @@ async def mine_deeplink(message: Message, command: CommandObject, state: FSMCont
     await _show_mine(message, message.from_user.id)
 
 
-async def _show_mine(message: Message, user_id: int) -> None:
-    from src.report_flow import MULTI_REPORTS, VISA_TYPES as VT, reports_menu_kb
+def _mine_list_kb(rows) -> InlineKeyboardMarkup:
+    from src.report_flow import MAX_REPORTS
+
+    kb = []
+    for r in rows:
+        lbl = f"{r['label']} · " if r["label"] else ""
+        kb.append([InlineKeyboardButton(
+            text=f"{lbl}{r['city']}, {VISA_TYPES[r['visa_type']].split('(')[0].strip()}",
+            callback_data=f"mineview:{r['id']}",
+        )])
+    if len(rows) < MAX_REPORTS:
+        kb.append([InlineKeyboardButton(text="➕ Добавить ещё анкету", callback_data="add:new")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+async def _show_mine(message: Message, user_id: int, edit: bool = False) -> None:
+    from src.report_flow import MULTI_REPORTS
 
     if MULTI_REPORTS:
         rows = db.reports_by_user(user_id)
         if len(rows) > 1:
-            # несколько анкет (групповая подача) — показываем список для выбора
-            from src.report_flow import MAX_REPORTS
             lines = [f"👤 <b>Ваши анкеты ({len(rows)})</b>", ""]
             for r in rows:
                 lbl = f"{r['label']} · " if r["label"] else ""
                 st = "⏳ ждёт" if not r["letter_date"] else f"✉️ {fmt(r['letter_date'])}"
-                lines.append(f"• {lbl}{r['city']}, {VT[r['visa_type']]} — {st}")
+                lines.append(f"• {lbl}{r['city']}, {VISA_TYPES[r['visa_type']]} — {st}")
             lines.append("")
-            lines.append("Выберите анкету, чтобы дополнить или исправить:")
-            await message.answer(
-                "\n".join(lines),
-                reply_markup=reports_menu_kb(rows, can_add=len(rows) < MAX_REPORTS),
-            )
+            lines.append("Выберите анкету:")
+            fn = message.edit_text if edit else message.answer
+            await fn("\n".join(lines), reply_markup=_mine_list_kb(rows))
             return
 
     row = db.find_latest(user_id)
@@ -340,6 +351,11 @@ async def _show_mine(message: Message, user_id: int) -> None:
             ]),
         )
         return
+    await _report_detail(message, row, edit)
+
+
+async def _report_detail(message: Message, row, edit: bool = False) -> None:
+    """Карточка одной анкеты с действиями (в т.ч. удаление)."""
     when = fmt(row["queue_date"]) + (f" в {row['queue_time']}" if row["queue_time"] else "")
     created = datetime.fromisoformat(row["created_at"]).strftime("%d.%m.%Y")
     slots = None
@@ -349,7 +365,7 @@ async def _show_mine(message: Message, user_id: int) -> None:
         slots = _json.loads(row["slots"])
     label_line = f"👥 Заявитель: <b>{row['label']}</b>\n" if row["label"] else ""
     lines = [
-        f"👤 <b>Ваша анкета</b> (от {created})",
+        f"👤 <b>Анкета</b> (от {created})",
         "",
         f"{label_line}🏙 {row['city']} · 📄 {VISA_TYPES[row['visa_type']]}",
         f"⏳ В очереди: <b>{when}</b>",
@@ -360,19 +376,30 @@ async def _show_mine(message: Message, user_id: int) -> None:
         f"Результат: <b>{OUTCOME_LABELS.get(row['outcome'], '—')}</b>",
         f"🎫 Срок визы: <b>{fmt_duration(row['visa_days'])}</b>",
     ]
-    buttons = []
+    rid = row["id"]
+    buttons = [
+        [InlineKeyboardButton(text="✏️ Дополнить / исправить", callback_data=f"pick:{rid}")],
+        [InlineKeyboardButton(text="🗑 Удалить анкету", callback_data=f"del:{rid}")],
+        [InlineKeyboardButton(text="👥 Люди рядом", callback_data=f"nearr:{rid}"),
+         InlineKeyboardButton(text=f"📄 Анкеты: {row['city']}",
+                              callback_data=f"lvisa:{row['city']}:{row['visa_type']}")],
+    ]
     if row["message_id"]:
-        buttons.append([InlineKeyboardButton(
-            text="👀 Открыть публикацию", url=post_link(row["message_id"])
-        )])
-    buttons.append([InlineKeyboardButton(text="✏️ Дополнить / исправить", callback_data="mine:edit")])
-    buttons.append([
-        InlineKeyboardButton(text="👥 Люди рядом", callback_data="near"),
-        InlineKeyboardButton(
-            text=f"📄 Анкеты: {row['city']}", callback_data=f"lvisa:{row['city']}:{row['visa_type']}"
-        ),
-    ])
-    await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        buttons.insert(0, [InlineKeyboardButton(
+            text="👀 Открыть публикацию", url=post_link(row["message_id"]))])
+    fn = message.edit_text if edit else message.answer
+    await fn("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+@router.callback_query(F.data.startswith("mineview:"))
+async def mine_view(callback: CallbackQuery) -> None:
+    rid = int(callback.data.split(":", 1)[1])
+    row = db.get_report(rid)
+    if row is None or row["user_id"] != callback.from_user.id:
+        await callback.answer("Анкета не найдена", show_alert=True)
+        return
+    await _report_detail(callback.message, row, edit=True)
+    await callback.answer()
 
 
 @router.callback_query(F.data == "mine:edit")
@@ -386,3 +413,47 @@ async def mine_edit(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await state.update_data(editing_id=row["id"])
     await edit_start(callback, state)
+
+
+# ---------- удаление своей анкеты ----------
+
+@router.callback_query(F.data.startswith("del:"))
+async def del_confirm(callback: CallbackQuery) -> None:
+    rid = int(callback.data.split(":", 1)[1])
+    row = db.get_report(rid)
+    if row is None or row["user_id"] != callback.from_user.id:
+        await callback.answer("Анкета не найдена", show_alert=True)
+        return
+    lbl = f"«{row['label']}» " if row["label"] else ""
+    await callback.message.edit_text(
+        f"🗑 Удалить анкету {lbl}({row['city']}, {VISA_TYPES[row['visa_type']]})?\n"
+        "Запись и её публикация в теме будут удалены безвозвратно.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"delok:{rid}")],
+            [InlineKeyboardButton(text="↩️ Отмена", callback_data=f"mineview:{rid}")],
+        ]),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("delok:"))
+async def del_do(callback: CallbackQuery) -> None:
+    from src import stats
+    from src.report_flow import CHAT_ID
+
+    rid = int(callback.data.split(":", 1)[1])
+    row = db.get_report(rid)
+    if row is None or row["user_id"] != callback.from_user.id:
+        await callback.answer("Анкета не найдена", show_alert=True)
+        return
+    if row["message_id"]:
+        try:
+            await callback.bot.delete_message(CHAT_ID, row["message_id"])
+        except Exception:
+            pass
+    db.delete_report(rid)
+    stats.note_write(row["city"], row["visa_type"])
+    await callback.message.edit_text(
+        "🗑 Анкета удалена. Освободился слот — при желании можно подать новую: /report"
+    )
+    await callback.answer("Удалено")
