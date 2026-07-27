@@ -237,6 +237,19 @@ def count_recent_by_user(user_id: int, days: int) -> int:
         ).fetchone()[0]
 
 
+def labels_recent_by_user(user_id: int, days: int) -> list[str]:
+    """Метки анкет пользователя за последние `days` дней — для автонумерации в пределах окна."""
+    from datetime import timedelta
+
+    threshold = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT label FROM reports WHERE user_id = ? AND created_at > ?",
+            (user_id, threshold),
+        ).fetchall()
+        return [r[0] for r in rows]
+
+
 def recent_reports(city: str, visa_type: str, limit: int = 50) -> list[sqlite3.Row]:
     with _connect() as conn:
         return conn.execute(

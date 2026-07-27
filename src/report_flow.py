@@ -605,8 +605,8 @@ async def _entry_gate_multi(message, state, uid, prefill) -> bool:
         return False  # анкет нет — обычный старт новой (с шага метки)
     recent = db.count_recent_by_user(uid, REPORT_COOLDOWN_DAYS)
     can_add = len(rows) < MAX_REPORTS and recent < MAX_REPORTS
-    labels = [r["label"] for r in rows]
-    await state.update_data(existing_labels=labels)
+    # для автонумерации меток берём только анкеты за окно лимита
+    await state.update_data(existing_labels=db.labels_recent_by_user(uid, REPORT_COOLDOWN_DAYS))
     head = f"У вас {len(rows)} анкет(ы). Выберите, что дополнить/исправить"
     if can_add:
         head += ", или добавьте ещё (напр. для семьи/пары):"
@@ -627,8 +627,8 @@ async def pick_report(callback: CallbackQuery, state: FSMContext) -> None:
 async def add_new(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     city, visa = data.get("pending_city"), data.get("pending_visa")
-    # метки берём из БД — надёжно и для входа из /mine, и для автонумерации
-    labels = [r["label"] for r in db.reports_by_user(callback.from_user.id)]
+    # метки за окно лимита — нумерация не тянется со старых поездок
+    labels = db.labels_recent_by_user(callback.from_user.id, REPORT_COOLDOWN_DAYS)
     # лимит за окно — не даём превысить
     if db.count_recent_by_user(callback.from_user.id, REPORT_COOLDOWN_DAYS) >= MAX_REPORTS:
         await callback.answer(
