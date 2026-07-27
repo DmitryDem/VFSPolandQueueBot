@@ -277,6 +277,26 @@ async def mine_deeplink(message: Message, command: CommandObject, state: FSMCont
 
 
 async def _show_mine(message: Message, user_id: int) -> None:
+    from src.report_flow import MULTI_REPORTS, VISA_TYPES as VT, reports_menu_kb
+
+    if MULTI_REPORTS:
+        rows = db.reports_by_user(user_id)
+        if len(rows) > 1:
+            # несколько анкет (групповая подача) — показываем список для выбора
+            from src.report_flow import MAX_REPORTS
+            lines = [f"👤 <b>Ваши анкеты ({len(rows)})</b>", ""]
+            for r in rows:
+                lbl = f"{r['label']} · " if r["label"] else ""
+                st = "⏳ ждёт" if not r["letter_date"] else f"✉️ {fmt(r['letter_date'])}"
+                lines.append(f"• {lbl}{r['city']}, {VT[r['visa_type']]} — {st}")
+            lines.append("")
+            lines.append("Выберите анкету, чтобы дополнить или исправить:")
+            await message.answer(
+                "\n".join(lines),
+                reply_markup=reports_menu_kb(rows, can_add=len(rows) < MAX_REPORTS),
+            )
+            return
+
     row = db.find_latest(user_id)
     if row is None:
         await message.answer(
@@ -294,10 +314,11 @@ async def _show_mine(message: Message, user_id: int) -> None:
         import json as _json
 
         slots = _json.loads(row["slots"])
+    label_line = f"👥 Заявитель: <b>{row['label']}</b>\n" if row["label"] else ""
     lines = [
         f"👤 <b>Ваша анкета</b> (от {created})",
         "",
-        f"🏙 {row['city']} · 📄 {VISA_TYPES[row['visa_type']]}",
+        f"{label_line}🏙 {row['city']} · 📄 {VISA_TYPES[row['visa_type']]}",
         f"⏳ В очереди: <b>{when}</b>",
         f"📬 Письмо: <b>{fmt(row['letter_date']) if row['letter_date'] else 'ещё не пришло'}</b>",
         f"📆 Даты записи: <b>{fmt_slots(slots)}</b>",

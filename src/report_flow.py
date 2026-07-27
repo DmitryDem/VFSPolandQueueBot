@@ -33,7 +33,13 @@ VISA_TYPES = {
     "C_OTHER": "Шенген C (Other)",
 }
 
-REPORT_COOLDOWN_DAYS = 14
+# мульти-анкеты (групповая подача) — за фича-флагом в config/topics.json
+MULTI_REPORTS = TOPICS.get("multi_reports", False)
+MAX_REPORTS = TOPICS.get("max_reports_per_user", 5)
+REPORT_COOLDOWN_DAYS = TOPICS.get("report_cooldown_days", 14)
+
+# обезличенные метки заявителя при групповой подаче
+LABEL_ROLES = ["Моя", "Партнёр", "Ребёнок", "Родитель"]
 
 DATE_RE = re.compile(r"^\s*(\d{1,2})[.](\d{1,2})[.](\d{4})\s*$")
 PERIOD_RE = re.compile(
@@ -47,6 +53,7 @@ BACK = "⬅️ Назад"
 
 
 class Report(StatesGroup):
+    label = State()
     city = State()
     visa_type = State()
     queue_date = State()
@@ -244,6 +251,41 @@ def keep_btn(step: str, label: str) -> list[InlineKeyboardButton]:
     return [InlineKeyboardButton(text=f"➡️ Оставить: {label}", callback_data=f"keep:{step}")]
 
 
+# ---------- мульти-анкеты: метки и меню списка ----------
+
+def next_label(role: str, existing: list[str]) -> str:
+    """Обезличенная метка с автонумерацией: второй «Ребёнок» → «Ребёнок 2» и т.д."""
+    same = [x for x in existing if x == role or (x or "").startswith(role + " ")]
+    if not same:
+        return role
+    return f"{role} {len(same) + 1}"
+
+
+def label_kb() -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=r, callback_data=f"lbl:{r}")] for r in LABEL_ROLES]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def report_line(row) -> str:
+    lbl = f"{row['label']} · " if row["label"] else ""
+    status = "⏳ ждёт" if not row["letter_date"] else f"✉️ {fmt(row['letter_date'])}"
+    return f"{lbl}{row['city']}, {VISA_TYPES[row['visa_type']]} — {status}"
+
+
+def reports_menu_kb(rows: list, can_add: bool) -> InlineKeyboardMarkup:
+    kb = []
+    for r in rows:
+        lbl = r["label"] or f"{r['city']}"
+        kb.append([InlineKeyboardButton(
+            text=f"✏️ {lbl}: {r['city']} {VISA_TYPES[r['visa_type']].split('(')[0].strip()}",
+            callback_data=f"pick:{r['id']}",
+        )])
+    if can_add:
+        kb.append([InlineKeyboardButton(text="➕ Добавить ещё анкету", callback_data="add:new")])
+    kb.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="edit:cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
 def user_label(username: str | None, first_name: str) -> str:
     return f"@{username}" if username else first_name
 
@@ -258,7 +300,10 @@ def build_post_text(
     d: dict, username: str | None, first_name: str, edited: bool, suspect: bool = False
 ) -> str:
     """Текст публикации в теме города."""
-    lines = [f"👤 {user_label(username, first_name)}"]
+    author = user_label(username, first_name)
+    if d.get("label"):
+        author += f" · 👥 {d['label']}"
+    lines = [f"👤 {author}"]
     when = fmt(d["queue_date"])
     if d.get("queue_time"):
         when += f" в {d['queue_time']}"
@@ -301,6 +346,7 @@ def build_post_text_from_row(row) -> tuple[str, str, str]:
         "passport_date": row["passport_date"],
         "outcome": row["outcome"],
         "visa_days": row["visa_days"],
+        "label": row["label"],
     }
     text = build_post_text(
         data, row["username"], "аноним", edited=False, suspect=bool(row["suspect"])
@@ -517,7 +563,10 @@ async def _entry_gate(
     `user_id` передаётся, когда вход не из сообщения пользователя (кнопка):
     message тогда принадлежит боту и message.from_user — не тот человек.
     """
-    latest = db.find_latest(user_id or message.from_user.id)
+    uid = user_id or message.from_user.id
+    if MULTI_REPORTS:
+        return await _entry_gate_multi(message, state, uid, prefill)
+    latest = db.find_latest(uid)
     if not latest:
         return False
     await state.update_data(editing_id=latest["id"])
@@ -546,6 +595,80 @@ async def _entry_gate(
     return True
 
 
+async def _entry_gate_multi(message, state, uid, prefill) -> bool:
+    """Мульти-режим: у пользователя может быть несколько анкет.
+    Показываем список + «добавить ещё» (в пределах лимита). Возврат True = меню показано."""
+    rows = db.reports_by_user(uid)
+    if prefill:
+        await state.update_data(pending_city=prefill[0], pending_visa=prefill[1])
+    if not rows:
+        return False  # анкет нет — обычный старт новой (с шага метки)
+    recent = db.count_recent_by_user(uid, REPORT_COOLDOWN_DAYS)
+    can_add = len(rows) < MAX_REPORTS and recent < MAX_REPORTS
+    labels = [r["label"] for r in rows]
+    await state.update_data(existing_labels=labels)
+    head = f"У вас {len(rows)} анкет(ы). Выберите, что дополнить/исправить"
+    if can_add:
+        head += ", или добавьте ещё (напр. для семьи/пары):"
+    else:
+        head += f".\nЛимит — {MAX_REPORTS} анкет за {REPORT_COOLDOWN_DAYS} дней достигнут."
+    await message.answer(head, reply_markup=reports_menu_kb(rows, can_add))
+    return True
+
+
+@router.callback_query(F.data.startswith("pick:"))
+async def pick_report(callback: CallbackQuery, state: FSMContext) -> None:
+    rid = int(callback.data.split(":", 1)[1])
+    await state.update_data(editing_id=rid)
+    await edit_start(callback, state)
+
+
+@router.callback_query(F.data == "add:new")
+async def add_new(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    city, visa = data.get("pending_city"), data.get("pending_visa")
+    # метки берём из БД — надёжно и для входа из /mine, и для автонумерации
+    labels = [r["label"] for r in db.reports_by_user(callback.from_user.id)]
+    # лимит за окно — не даём превысить
+    if db.count_recent_by_user(callback.from_user.id, REPORT_COOLDOWN_DAYS) >= MAX_REPORTS:
+        await callback.answer(
+            f"Лимит {MAX_REPORTS} анкет за {REPORT_COOLDOWN_DAYS} дней достигнут.", show_alert=True
+        )
+        return
+    await state.clear()
+    await state.update_data(existing_labels=labels, pending_city=city, pending_visa=visa)
+    await ask_label(callback.message, state, edit=True)
+    await callback.answer()
+
+
+async def ask_label(message: Message, state: FSMContext, edit: bool = False) -> None:
+    await state.set_state(Report.label)
+    await _render(
+        message,
+        "Чья это анкета? (для групповой подачи — семья, пара)\n"
+        "Выберите роль — так вы не перепутаете свои анкеты. Имена вводить не нужно.",
+        label_kb(),
+        edit,
+    )
+
+
+@router.callback_query(Report.label, F.data.startswith("lbl:"))
+async def pick_label(callback: CallbackQuery, state: FSMContext) -> None:
+    role = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    label = next_label(role, data.get("existing_labels", []))
+    await state.update_data(label=label)
+    city, visa = data.get("pending_city"), data.get("pending_visa")
+    if city and visa:
+        db.log_event(callback.from_user.id, "city")
+        db.log_event(callback.from_user.id, "visa")
+        await state.update_data(city=city, visa_type=visa)
+        await ask_queue_date(callback.message, state, edit=True)
+    else:
+        await ask_city(callback.message, state, edit=True)
+    await callback.answer()
+
+
 @router.message(CommandStart(deep_link=True))
 async def cmd_start_deeplink(message: Message, command: CommandObject, state: FSMContext) -> None:
     await state.clear()
@@ -557,6 +680,11 @@ async def cmd_start_deeplink(message: Message, command: CommandObject, state: FS
     if await _entry_gate(message, state, prefill=parsed):
         return
     city, visa = parsed
+    if MULTI_REPORTS:
+        # первая анкета в мульти-режиме: сначала метка, город/тип уже из темы
+        await state.update_data(pending_city=city, pending_visa=visa, existing_labels=[])
+        await ask_label(message, state)
+        return
     # город и тип подставлены из темы — для воронки эти шаги пройдены
     db.log_event(message.from_user.id, "city")
     db.log_event(message.from_user.id, "visa")
@@ -570,6 +698,10 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     await state.clear()
     db.log_event(message.from_user.id, "start")
     if await _entry_gate(message, state):
+        return
+    if MULTI_REPORTS:
+        await state.update_data(existing_labels=[])
+        await ask_label(message, state)
         return
     await ask_city(message, state, greet=True)
 
@@ -627,11 +759,14 @@ async def edit_start(callback: CallbackQuery, state: FSMContext) -> None:
         passport_date=row["passport_date"],
         outcome=row["outcome"],
         visa_days=row["visa_days"],
+        label=row["label"],
     )
-    await callback.message.edit_text(
-        "Дополним анкету. На каждом шаге можно нажать «➡️ Оставить», чтобы не вводить "
-        "заново то, что не изменилось, — и дойти до места, где появились новые данные."
-    )
+    head = "Дополним анкету"
+    if row["label"]:
+        head += f" «{row['label']}»"
+    head += (". На каждом шаге можно нажать «➡️ Оставить», чтобы не вводить заново "
+             "то, что не изменилось, — и дойти до места, где появились новые данные.")
+    await callback.message.edit_text(head)
     await ask_city(callback.message, state)
     await callback.answer()
 
@@ -990,8 +1125,10 @@ async def show_summary(message: Message, state: FSMContext, edit: bool = False) 
     when = fmt(data["queue_date"])
     if data.get("queue_time"):
         when += f" в {data['queue_time']}"
+    label_line = f"👥 Заявитель: <b>{data['label']}</b>\n" if data.get("label") else ""
     text = (
         "Проверьте данные:\n\n"
+        f"{label_line}"
         f"🏙 Город: <b>{data['city']}</b>\n"
         f"📄 Тип визы: <b>{VISA_TYPES[data['visa_type']]}</b>\n"
         f"⏳ Встал(а) в очередь: <b>{when}</b>\n"
@@ -1041,6 +1178,7 @@ async def confirm_yes(callback: CallbackQuery, state: FSMContext) -> None:
         outcome=data.get("outcome"),
         suspect=suspect,
         visa_days=data.get("visa_days"),
+        label=data.get("label"),
     )
     db.log_event(user.id, "saved_new")
     if suspect:
@@ -1219,6 +1357,7 @@ async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> N
         suspect=suspect,
         username=user.username,
         visa_days=data.get("visa_days"),
+        label=data.get("label"),
     )
     if suspect and not (old["suspect"] or 0):
         await _notify_admin_suspect(callback.bot, editing_id, data, user)

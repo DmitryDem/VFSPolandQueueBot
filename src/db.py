@@ -56,6 +56,8 @@ _MIGRATIONS = [
     "ALTER TABLE reports ADD COLUMN visa_days INTEGER",
     # уточнение категории для D (Other): KARTA | STUDY | NULL
     "ALTER TABLE reports ADD COLUMN subcategory TEXT",
+    # метка заявителя при групповой подаче (обезличенная роль): «Моя», «Ребёнок 2» и т.п.
+    "ALTER TABLE reports ADD COLUMN label TEXT",
 ]
 
 
@@ -91,17 +93,18 @@ def save_report(
     suspect: int = 0,
     visa_days: int | None = None,
     subcategory: str | None = None,
+    label: str | None = None,
 ) -> int:
     with _connect() as conn:
         cur = conn.execute(
             """INSERT INTO reports
                (user_id, username, city, visa_type, queue_date, queue_time,
                 letter_date, slots, submit_date, passport_date, outcome, suspect,
-                visa_days, subcategory, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                visa_days, subcategory, label, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (user_id, username, city, visa_type, queue_date, queue_time,
              letter_date, slots, submit_date, passport_date, outcome, suspect,
-             visa_days, subcategory, _now()),
+             visa_days, subcategory, label, _now()),
         )
         return cur.lastrowid
 
@@ -119,6 +122,7 @@ def update_report(
     username: str | None = None,
     visa_days: int | None = None,
     subcategory: str | None = None,
+    label: str | None = None,
 ) -> None:
     """Обновляет анкету; username освежается при каждой правке (мог появиться/смениться)."""
     with _connect() as conn:
@@ -126,10 +130,10 @@ def update_report(
             """UPDATE reports SET queue_date = ?, queue_time = ?, letter_date = ?,
                slots = ?, submit_date = ?, passport_date = ?, outcome = ?,
                suspect = ?, username = ?, visa_days = ?, subcategory = ?,
-               updated_at = ? WHERE id = ?""",
+               label = ?, updated_at = ? WHERE id = ?""",
             (queue_date, queue_time, letter_date, slots, submit_date,
              passport_date, outcome, suspect, username, visa_days, subcategory,
-             _now(), report_id),
+             label, _now(), report_id),
         )
 
 
@@ -210,6 +214,27 @@ def find_latest(user_id: int) -> sqlite3.Row | None:
             "SELECT * FROM reports WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
             (user_id,),
         ).fetchone()
+
+
+def reports_by_user(user_id: int) -> list[sqlite3.Row]:
+    """Все анкеты пользователя (для мульти-анкет), свежие сверху."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT * FROM reports WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+
+
+def count_recent_by_user(user_id: int, days: int) -> int:
+    """Сколько анкет пользователь создал за последние `days` дней (лимит групповой подачи)."""
+    from datetime import timedelta
+
+    threshold = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM reports WHERE user_id = ? AND created_at > ?",
+            (user_id, threshold),
+        ).fetchone()[0]
 
 
 def recent_reports(city: str, visa_type: str, limit: int = 50) -> list[sqlite3.Row]:
