@@ -1,6 +1,6 @@
 {
   "chat_id": -1003983835902,
-  "multi_reports": false,
+  "multi_reports": true,
   "max_reports_per_user": 5,
   "report_cooldown_days": 30,
   "service_topics": {
