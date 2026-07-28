@@ -297,6 +297,20 @@ SUSPECT_NOTE = (
     "⚠️ <i>Отмечено как сомнительное: срок ожидания аномально короткий. "
     "В статистике и прогнозах не учитывается.</i>"
 )
+ERROR_NOTE = (
+    "❌ <i>Ошибка: дата постановки раньше запуска очереди "
+    f"({QUEUE_START.strftime('%d.%m.%Y')}). В статистике не учитывается.</i>"
+)
+
+
+def suspect_note(d: dict) -> str:
+    """Текст пометки по причине: ранняя дата = точная ошибка, иначе — сомнительный срок."""
+    try:
+        if datetime.strptime(d["queue_date"], "%Y-%m-%d").date() < QUEUE_START:
+            return ERROR_NOTE
+    except (KeyError, TypeError, ValueError):
+        pass
+    return SUSPECT_NOTE
 
 
 def build_post_text(
@@ -330,7 +344,7 @@ def build_post_text(
     if d.get("outcome") == "APPROVED" and d.get("visa_days"):
         lines.append(f"🎫 Виза на <b>{fmt_duration(d['visa_days'])}</b>")
     if suspect:
-        lines.append(f"\n{SUSPECT_NOTE}")
+        lines.append(f"\n{suspect_note(d)}")
     if edited:
         lines.append("\n✏️ <i>обновлено</i>")
     return "\n".join(lines)
