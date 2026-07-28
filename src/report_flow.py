@@ -41,6 +41,9 @@ REPORT_COOLDOWN_DAYS = TOPICS.get("report_cooldown_days", 14)
 # обезличенные метки заявителя при групповой подаче
 LABEL_ROLES = ["Моя", "Партнёр", "Ребёнок", "Родитель"]
 
+# дата запуска очереди VFS — раньше неё встать в очередь нельзя
+QUEUE_START = date(2026, 6, 8)
+
 DATE_RE = re.compile(r"^\s*(\d{1,2})[.](\d{1,2})[.](\d{4})\s*$")
 PERIOD_RE = re.compile(
     r"^\s*(\d{1,2}[.]\d{1,2}[.]\d{4})\s*[-–—]\s*(\d{1,2}[.]\d{1,2}[.]\d{4})\s*$"
@@ -926,6 +929,12 @@ async def input_queue_date(message: Message, state: FSMContext) -> None:
         return
     if d > date.today():
         await message.answer("Дата постановки в очередь не может быть в будущем. Проверьте и введите ещё раз.")
+        return
+    if d < QUEUE_START:
+        await message.answer(
+            f"Очередь VFS запущена {QUEUE_START.strftime('%d.%m.%Y')} — встать раньше нельзя. "
+            "Проверьте дату постановки и введите ещё раз."
+        )
         return
     await state.update_data(queue_date=d.isoformat())
     db.log_event(message.from_user.id, "queue_date")
