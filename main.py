@@ -8,7 +8,8 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats, FSInputFile, InputMediaPhoto
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats, ErrorEvent, FSInputFile, InputMediaPhoto
 from dotenv import load_dotenv
 
 from src import stats
@@ -76,6 +77,20 @@ async def _send_ranking_charts(bot: Bot, stats_topic: int) -> None:
             Path(p).unlink(missing_ok=True)
 
 
+# безобидные ошибки Telegram: гасим тихо, чтобы не засорять лог и не рвать обработчик
+_BENIGN = ("message is not modified", "query is too old", "message to edit not found",
+           "message can't be edited")
+
+
+async def on_error(event: ErrorEvent) -> bool:
+    exc = event.exception
+    if isinstance(exc, TelegramBadRequest) and any(s in str(exc) for s in _BENIGN):
+        log.debug("benign Telegram error ignored: %s", exc)
+        return True  # обработано — не логируем как ERROR
+    log.exception("Unhandled update error", exc_info=exc)
+    return True
+
+
 async def main() -> None:
     load_dotenv()
     bot = Bot(
@@ -83,6 +98,7 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
+    dp.errors.register(on_error)
     dp.include_router(captcha_router)
     dp.include_router(docs_router)
     dp.include_router(browse_router)
