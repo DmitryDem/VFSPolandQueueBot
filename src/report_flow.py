@@ -1332,30 +1332,8 @@ async def admin_decision(callback: CallbackQuery) -> None:
 
 
 async def _post_save_hooks(bot, city: str, visa_type: str, letter_iso: str | None) -> None:
-    """После сохранения анкеты: учёт записи для кеша статистики + алерт о всплеске."""
+    """После сохранения анкеты: сброс кеша статистики."""
     stats.note_write(city, visa_type)
-    if not letter_iso or db.alert_sent(city, visa_type, letter_iso):
-        return
-    spike = stats.check_spike(city, visa_type, letter_iso)
-    if not spike:
-        return
-    tid = topic_id(city, visa_type)
-    if not tid:
-        return
-    db.mark_alert(city, visa_type, letter_iso)
-    ld = datetime.strptime(letter_iso, "%Y-%m-%d").strftime("%d.%m.%Y")
-    me = await bot.me()
-    await bot.send_message(
-        chat_id=CHAT_ID,
-        message_thread_id=tid,
-        text=(
-            f"📈 <b>Очередь двинулась!</b>\n"
-            f"За <b>{ld}</b> по анкетам уже <b>{spike}</b> приглашений в визовый центр "
-            f"({city}, {VISA_TYPES[visa_type]}). Ждёте письмо с близкой датой постановки — "
-            "проверяйте почту!"
-        ),
-        reply_markup=post_kb(me.username, city, visa_type),
-    )
 
 
 async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> None:
