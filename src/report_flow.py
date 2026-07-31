@@ -463,8 +463,8 @@ async def ask_queue_num(message: Message, state: FSMContext, edit: bool = False)
         message,
         "🔢 Ваш номер очереди? Он есть в письме/личном кабинете и начинается с "
         "<b>PLB</b>, например <code>PLB4515687153</code>.\n\n"
-        "Можно ввести номер целиком или только первые цифры — я сохраню лишь "
-        "<b>первые 5</b> (например <b>PLB 45156…</b>).\n\n"
+        "Введите только <b>первые 5 цифр</b> после PLB — в примере это "
+        "<b>45156</b>. Весь номер вводить не нужно.\n\n"
         "<i>Поле необязательное. Эти цифры инкрементальны — по ним можно оценить "
         "общий размер очереди.</i>",
         _kb(*rows),
@@ -1021,8 +1021,8 @@ async def input_queue_num(message: Message, state: FSMContext) -> None:
     num = parse_queue_num(message.text)
     if num is None:
         await message.answer(
-            "Не разобрал номер. Он начинается с <b>PLB</b> и содержит цифры, "
-            "например <code>PLB4515687153</code>. Введите ещё раз или нажмите «Пропустить»."
+            "Нужны <b>первые 5 цифр</b> номера после PLB, например <b>45156</b> "
+            "(из <code>PLB4515687153</code>). Введите ещё раз или нажмите «Пропустить»."
         )
         return
     await state.update_data(queue_num=num)
