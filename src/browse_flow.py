@@ -369,6 +369,7 @@ async def _report_detail(message: Message, row, edit: bool = False) -> None:
         "",
         f"{label_line}🏙 {row['city']} · 📄 {VISA_TYPES[row['visa_type']]}",
         f"⏳ В очереди: <b>{when}</b>",
+        *([f"🔢 Номер очереди: <b>PLB {row['queue_num']}…</b>"] if row["queue_num"] else []),
         f"📬 Письмо: <b>{fmt(row['letter_date']) if row['letter_date'] else 'ещё не пришло'}</b>",
         f"📆 Даты записи: <b>{fmt_slots(slots)}</b>",
         f"📄 Подача: <b>{fmt(row['submit_date'])}</b>",

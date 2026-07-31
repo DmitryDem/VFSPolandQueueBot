@@ -61,6 +61,7 @@ class Report(StatesGroup):
     visa_type = State()
     queue_date = State()
     queue_time = State()
+    queue_num = State()
     letter_date = State()
     slots = State()
     submit_date = State()
@@ -133,6 +134,14 @@ def parse_date(text: str) -> date | None:
         return date(year, month, day)
     except ValueError:
         return None
+
+
+def parse_queue_num(text: str) -> str | None:
+    """Первые 5 цифр номера очереди (префикс PLB и прочее игнорируем). None, если цифр < 5."""
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) < 5:
+        return None
+    return digits[:5]
 
 
 def fmt(iso: str | None) -> str:
@@ -325,6 +334,8 @@ def build_post_text(
     if d.get("queue_time"):
         when += f" в {d['queue_time']}"
     lines.append(f"⏳ Встал(а) в очередь: <b>{when}</b>")
+    if d.get("queue_num"):
+        lines.append(f"🔢 Номер очереди: <b>PLB {d['queue_num']}…</b>")
     if d.get("letter_date"):
         waited = (
             datetime.strptime(d["letter_date"], "%Y-%m-%d").date()
@@ -357,6 +368,7 @@ def build_post_text_from_row(row) -> tuple[str, str, str]:
         "visa_type": row["visa_type"],
         "queue_date": row["queue_date"],
         "queue_time": row["queue_time"],
+        "queue_num": row["queue_num"],
         "letter_date": row["letter_date"],
         "slots": json.loads(row["slots"]) if row["slots"] else None,
         "submit_date": row["submit_date"],
@@ -439,6 +451,27 @@ async def ask_queue_time(message: Message, state: FSMContext, edit: bool = False
     )
 
 
+async def ask_queue_num(message: Message, state: FSMContext, edit: bool = False) -> None:
+    data = await state.get_data()
+    await state.set_state(Report.queue_num)
+    rows = []
+    if data.get("queue_num"):
+        rows.append(keep_btn("qnum", f"PLB {data['queue_num']}…"))
+    rows.append([InlineKeyboardButton(text="🤷 Пропустить", callback_data="qnum:none")])
+    rows.append([back_btn("time")])
+    await _render(
+        message,
+        "🔢 Ваш номер очереди? Он есть в письме/личном кабинете и начинается с "
+        "<b>PLB</b>, например <code>PLB4515687153</code>.\n\n"
+        "Можно ввести номер целиком или только первые цифры — я сохраню лишь "
+        "<b>первые 5</b> (например <b>PLB 45156…</b>).\n\n"
+        "<i>Поле необязательное. Эти цифры инкрементальны — по ним можно оценить "
+        "общий размер очереди.</i>",
+        _kb(*rows),
+        edit,
+    )
+
+
 async def ask_letter_date(message: Message, state: FSMContext, edit: bool = False) -> None:
     data = await state.get_data()
     await state.set_state(Report.letter_date)
@@ -446,7 +479,7 @@ async def ask_letter_date(message: Message, state: FSMContext, edit: bool = Fals
     if data.get("letter_date"):
         rows.append(keep_btn("letter", fmt(data["letter_date"])))
     rows.append([InlineKeyboardButton(text="📭 Письмо ещё не пришло", callback_data="letter:none")])
-    rows.append([back_btn("time")])
+    rows.append([back_btn("qnum")])
     await _render(
         message,
         "Когда на почту пришло письмо с приглашением записаться в визовый центр?\n"
@@ -770,6 +803,7 @@ async def edit_start(callback: CallbackQuery, state: FSMContext) -> None:
         visa_type=row["visa_type"],
         queue_date=row["queue_date"],
         queue_time=row["queue_time"],
+        queue_num=row["queue_num"],
         letter_date=row["letter_date"],
         slots=json.loads(row["slots"]) if row["slots"] else None,
         submit_date=row["submit_date"],
@@ -845,7 +879,8 @@ async def keep_value(callback: CallbackQuery, state: FSMContext) -> None:
         "city": ("city", ask_visa),
         "visa": ("visa_type", ask_queue_date),
         "queue": ("queue_date", ask_queue_time),
-        "time": ("queue_time", ask_letter_date),
+        "time": ("queue_time", ask_queue_num),
+        "qnum": ("queue_num", ask_letter_date),
         "letter": ("letter_date", ask_slots),
         "slots": ("slots", ask_submit_date),
         "submit": ("submit_date", ask_passport_date),
@@ -890,6 +925,8 @@ async def go_back(callback: CallbackQuery, state: FSMContext) -> None:
         await ask_queue_date(callback.message, state, edit=True)
     elif target == "time" and data.get("queue_date"):
         await ask_queue_time(callback.message, state, edit=True)
+    elif target == "qnum" and data.get("queue_date"):
+        await ask_queue_num(callback.message, state, edit=True)
     elif target == "letter" and data.get("queue_date"):
         await ask_letter_date(callback.message, state, edit=True)
     elif target == "slots" and data.get("letter_date"):
@@ -958,7 +995,7 @@ async def input_queue_date(message: Message, state: FSMContext) -> None:
 @router.callback_query(Report.queue_time, F.data == "time:none")
 async def queue_time_none(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(queue_time=None)
-    await ask_letter_date(callback.message, state, edit=True)
+    await ask_queue_num(callback.message, state, edit=True)
     await callback.answer()
 
 
@@ -969,6 +1006,26 @@ async def input_queue_time(message: Message, state: FSMContext) -> None:
         await message.answer("Не понял время. Формат: ЧЧ:ММ, например 09:15 — или нажмите «пропустить».")
         return
     await state.update_data(queue_time=t)
+    await ask_queue_num(message, state)
+
+
+@router.callback_query(Report.queue_num, F.data == "qnum:none")
+async def queue_num_none(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(queue_num=None)
+    await ask_letter_date(callback.message, state, edit=True)
+    await callback.answer()
+
+
+@router.message(Report.queue_num, F.text)
+async def input_queue_num(message: Message, state: FSMContext) -> None:
+    num = parse_queue_num(message.text)
+    if num is None:
+        await message.answer(
+            "Не разобрал номер. Он начинается с <b>PLB</b> и содержит цифры, "
+            "например <code>PLB4515687153</code>. Введите ещё раз или нажмите «Пропустить»."
+        )
+        return
+    await state.update_data(queue_num=num)
     await ask_letter_date(message, state)
 
 
@@ -1155,6 +1212,7 @@ async def show_summary(message: Message, state: FSMContext, edit: bool = False) 
         f"🏙 Город: <b>{data['city']}</b>\n"
         f"📄 Тип визы: <b>{VISA_TYPES[data['visa_type']]}</b>\n"
         f"⏳ Встал(а) в очередь: <b>{when}</b>\n"
+        f"🔢 Номер очереди: <b>{('PLB ' + data['queue_num'] + '…') if data.get('queue_num') else '—'}</b>\n"
         f"📬 Письмо-приглашение: <b>{fmt(data.get('letter_date'))}</b>\n"
         f"📆 Доступные даты записи: <b>{fmt_slots(data.get('slots'))}</b>\n"
         f"📄 Подача документов: <b>{fmt(data.get('submit_date'))}</b>\n"
@@ -1194,6 +1252,7 @@ async def confirm_yes(callback: CallbackQuery, state: FSMContext) -> None:
         visa_type=data["visa_type"],
         queue_date=data["queue_date"],
         queue_time=data.get("queue_time"),
+        queue_num=data.get("queue_num"),
         letter_date=data.get("letter_date"),
         slots=json.dumps(data["slots"]) if data.get("slots") else None,
         submit_date=data.get("submit_date"),
@@ -1350,6 +1409,7 @@ async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> N
         report_id=editing_id,
         queue_date=data["queue_date"],
         queue_time=data.get("queue_time"),
+        queue_num=data.get("queue_num"),
         letter_date=data.get("letter_date"),
         slots=json.dumps(data["slots"]) if data.get("slots") else None,
         submit_date=data.get("submit_date"),

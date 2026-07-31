@@ -58,6 +58,8 @@ _MIGRATIONS = [
     "ALTER TABLE reports ADD COLUMN subcategory TEXT",
     # метка заявителя при групповой подаче (обезличенная роль): «Моя», «Ребёнок 2» и т.п.
     "ALTER TABLE reports ADD COLUMN label TEXT",
+    # первые 5 цифр номера очереди (после префикса PLB); инкрементальны — для оценки размера очереди
+    "ALTER TABLE reports ADD COLUMN queue_num TEXT",
 ]
 
 
@@ -94,17 +96,18 @@ def save_report(
     visa_days: int | None = None,
     subcategory: str | None = None,
     label: str | None = None,
+    queue_num: str | None = None,
 ) -> int:
     with _connect() as conn:
         cur = conn.execute(
             """INSERT INTO reports
                (user_id, username, city, visa_type, queue_date, queue_time,
                 letter_date, slots, submit_date, passport_date, outcome, suspect,
-                visa_days, subcategory, label, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                visa_days, subcategory, label, queue_num, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (user_id, username, city, visa_type, queue_date, queue_time,
              letter_date, slots, submit_date, passport_date, outcome, suspect,
-             visa_days, subcategory, label, _now()),
+             visa_days, subcategory, label, queue_num, _now()),
         )
         return cur.lastrowid
 
@@ -123,6 +126,7 @@ def update_report(
     visa_days: int | None = None,
     subcategory: str | None = None,
     label: str | None = None,
+    queue_num: str | None = None,
 ) -> None:
     """Обновляет анкету; username освежается при каждой правке (мог появиться/смениться)."""
     with _connect() as conn:
@@ -130,10 +134,10 @@ def update_report(
             """UPDATE reports SET queue_date = ?, queue_time = ?, letter_date = ?,
                slots = ?, submit_date = ?, passport_date = ?, outcome = ?,
                suspect = ?, username = ?, visa_days = ?, subcategory = ?,
-               label = ?, updated_at = ? WHERE id = ?""",
+               label = ?, queue_num = ?, updated_at = ? WHERE id = ?""",
             (queue_date, queue_time, letter_date, slots, submit_date,
              passport_date, outcome, suspect, username, visa_days, subcategory,
-             label, _now(), report_id),
+             label, queue_num, _now(), report_id),
         )
 
 
