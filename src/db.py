@@ -58,7 +58,7 @@ _MIGRATIONS = [
     "ALTER TABLE reports ADD COLUMN subcategory TEXT",
     # метка заявителя при групповой подаче (обезличенная роль): «Моя», «Ребёнок 2» и т.п.
     "ALTER TABLE reports ADD COLUMN label TEXT",
-    # первые 5 цифр номера очереди (после префикса PLB); инкрементальны — для оценки размера очереди
+    # первые 6 цифр номера очереди (после префикса PLB); инкрементальны — для оценки размера очереди
     "ALTER TABLE reports ADD COLUMN queue_num TEXT",
 ]
 

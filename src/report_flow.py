@@ -137,11 +137,11 @@ def parse_date(text: str) -> date | None:
 
 
 def parse_queue_num(text: str) -> str | None:
-    """Первые 5 цифр номера очереди (префикс PLB и прочее игнорируем). None, если цифр < 5."""
+    """Первые 6 цифр номера очереди (префикс PLB и прочее игнорируем). None, если цифр < 6."""
     digits = "".join(ch for ch in text if ch.isdigit())
-    if len(digits) < 5:
+    if len(digits) < 6:
         return None
-    return digits[:5]
+    return digits[:6]
 
 
 def fmt(iso: str | None) -> str:
@@ -463,8 +463,8 @@ async def ask_queue_num(message: Message, state: FSMContext, edit: bool = False)
         message,
         "🔢 Ваш номер очереди? Он есть в письме/личном кабинете и начинается с "
         "<b>PLB</b>, например <code>PLB1234567890</code>.\n\n"
-        "Введите только <b>первые 5 цифр</b> после PLB — в примере это "
-        "<b>12345</b>. Весь номер вводить не нужно.\n\n"
+        "Введите только <b>первые 6 цифр</b> после PLB — в примере это "
+        "<b>123456</b>. Весь номер вводить не нужно.\n\n"
         "<i>Поле необязательное. Эти цифры инкрементальны — по ним можно оценить "
         "общий размер очереди.</i>",
         _kb(*rows),
@@ -1021,7 +1021,7 @@ async def input_queue_num(message: Message, state: FSMContext) -> None:
     num = parse_queue_num(message.text)
     if num is None:
         await message.answer(
-            "Нужны <b>первые 5 цифр</b> номера после PLB, например <b>12345</b> "
+            "Нужны <b>первые 6 цифр</b> номера после PLB, например <b>123456</b> "
             "(из <code>PLB1234567890</code>). Введите ещё раз или нажмите «Пропустить»."
         )
         return
