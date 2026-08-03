@@ -27,6 +27,32 @@ log = logging.getLogger("main")
 DAILY_SUMMARY_HOUR = 9  # локальное время ежедневной сводки
 
 
+TELEGRAM_MSG_LIMIT = 4096
+
+
+def _split_message(text: str, limit: int = 3900) -> list[str]:
+    """Режет длинный текст на части по границам строк (лимит Telegram — 4096)."""
+    if len(text) <= limit:
+        return [text]
+    chunks, cur = [], ""
+    for line in text.split("\n"):
+        # одна строка длиннее лимита — жёстко режем по символам (крайне маловероятно)
+        while len(line) > limit:
+            if cur:
+                chunks.append(cur)
+                cur = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        if len(cur) + len(line) + 1 > limit:
+            chunks.append(cur)
+            cur = line
+        else:
+            cur = f"{cur}\n{line}" if cur else line
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
 async def daily_summary_loop(bot: Bot) -> None:
     stats_topic = TOPICS["service_topics"].get("stats")
     if not stats_topic:
@@ -41,7 +67,8 @@ async def daily_summary_loop(bot: Bot) -> None:
         try:
             text = stats.build_daily_summary(CITIES, VISA_TYPES)
             if text:
-                await bot.send_message(chat_id=CHAT_ID, message_thread_id=stats_topic, text=text)
+                for chunk in _split_message(text):
+                    await bot.send_message(chat_id=CHAT_ID, message_thread_id=stats_topic, text=chunk)
                 await _send_ranking_charts(bot, stats_topic)
                 log.info("Ежедневная сводка опубликована")
             else:
