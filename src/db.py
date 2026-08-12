@@ -281,6 +281,17 @@ def count_by_city(city: str) -> int:
         ).fetchone()[0]
 
 
+def reports_by_city_visa(city: str, visa_type: str, offset: int, limit: int) -> list[sqlite3.Row]:
+    """Страница анкет города и типа визы в порядке постановки в очередь."""
+    with _connect() as conn:
+        return conn.execute(
+            """SELECT * FROM reports WHERE city = ? AND visa_type = ?
+               ORDER BY queue_date, COALESCE(queue_time, '99:99'), id
+               LIMIT ? OFFSET ?""",
+            (city, visa_type, limit, offset),
+        ).fetchall()
+
+
 def reports_for(city: str, visa_type: str) -> list[sqlite3.Row]:
     """Все анкеты по городу и типу визы (для статистики)."""
     with _connect() as conn:

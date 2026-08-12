@@ -150,14 +150,6 @@ async def list_page(callback: CallbackQuery) -> None:
 # ---------- /queue: очередь города в порядке постановки ----------
 
 QUEUE_PAGE = 15
-_VISA_SHORT = {
-    "D_OTHER": "D",
-    "D_WORK": "D·Work",
-    "D_DRIVER": "D·Driver",
-    "D_KARTA": "D·Карта",
-    "D_STUDENT": "D·Student",
-    "C_OTHER": "C",
-}
 
 
 def _queue_status(row) -> str:
@@ -179,8 +171,7 @@ def _fmt_queue_row(row, pos: int) -> str:
         when += f" {row['queue_time']}"
     if row["message_id"]:
         when = f'<a href="{post_link(row["message_id"])}">{when}</a>'
-    visa = _VISA_SHORT.get(row["visa_type"], row["visa_type"])
-    return f"{pos}. {suspect}{when} · {visa} · {_queue_status(row)} · {user_label(row['username'], 'аноним')}"
+    return f"{pos}. {suspect}{when} · {_queue_status(row)} · {user_label(row['username'], 'аноним')}"
 
 
 def _queue_city_kb() -> InlineKeyboardMarkup:
@@ -195,29 +186,43 @@ def _queue_city_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _render_queue(message: Message, city: str, offset: int, edit: bool) -> None:
-    rows = db.reports_by_city(city, offset, QUEUE_PAGE)
-    total = db.count_by_city(city)
+def _queue_visa_kb(city: str) -> InlineKeyboardMarkup:
+    from src.report_flow import topic_id
+
+    rows = [
+        [InlineKeyboardButton(text=label, callback_data=f"qvisa:{city}:{key}")]
+        for key, label in VISA_TYPES.items()
+        if topic_id(city, key)
+    ]
+    rows.append([InlineKeyboardButton(text="🔙 Другой город", callback_data="qback")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _render_queue(message: Message, city: str, visa: str, offset: int, edit: bool) -> None:
+    rows = db.reports_by_city_visa(city, visa, offset, QUEUE_PAGE)
+    total = db.count_reports(city, visa)
+    label = VISA_TYPES[visa]
     if total == 0:
-        text = f"📜 <b>{city} — очередь по постановке</b>\n\nАнкет пока нет."
+        text = f"📜 <b>{city} — {label}</b>\nОчередь по постановке\n\nАнкет пока нет."
     else:
-        lines = [f"📜 <b>{city} — очередь по постановке</b> · анкет: {total}", ""]
+        lines = [f"📜 <b>{city} — {label}</b> · очередь по постановке · анкет: {total}", ""]
         lines += [_fmt_queue_row(r, offset + i + 1) for i, r in enumerate(rows)]
         lines.append("")
-        lines.append("<i>№ по дате постановки · тип · статус (✉️ письмо, 📄 подача, "
+        lines.append("<i>№ по дате постановки · статус (✉️ письмо, 📄 подача, "
                      "🛂 паспорт, ✅/❌ результат, ⏳ ждёт); дата — ссылка на публикацию</i>")
         text = "\n".join(lines)
 
     nav = []
     if offset > 0:
         nav.append(InlineKeyboardButton(
-            text="◀️ Назад", callback_data=f"qpage:{city}:{max(0, offset - QUEUE_PAGE)}"))
+            text="◀️ Назад", callback_data=f"qpage:{city}:{visa}:{max(0, offset - QUEUE_PAGE)}"))
     if offset + QUEUE_PAGE < total:
         nav.append(InlineKeyboardButton(
             text=f"▶️ Ещё ({total - offset - QUEUE_PAGE})",
-            callback_data=f"qpage:{city}:{offset + QUEUE_PAGE}"))
+            callback_data=f"qpage:{city}:{visa}:{offset + QUEUE_PAGE}"))
     buttons = ([nav] if nav else []) + [
-        [InlineKeyboardButton(text="🔙 Другой город", callback_data="qback")]
+        [InlineKeyboardButton(text="🔙 Другой тип", callback_data=f"qcity:{city}"),
+         InlineKeyboardButton(text="🏙 Другой город", callback_data="qback")]
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     if edit:
@@ -233,11 +238,19 @@ def _resolve_city(arg: str | None) -> str | None:
     return next((c for c in CITIES if c.lower() == arg), None)
 
 
+async def _ask_queue_visa(message: Message, city: str, edit: bool) -> None:
+    text = f"Город: <b>{city}</b>\n\nКакой тип визы показать (очередь по постановке)?"
+    if edit:
+        await message.edit_text(text, reply_markup=_queue_visa_kb(city))
+    else:
+        await message.answer(text, reply_markup=_queue_visa_kb(city))
+
+
 @router.message(Command("queue"), F.chat.type == "private")
 async def cmd_queue(message: Message, command: CommandObject) -> None:
     city = _resolve_city(command.args)
     if city:
-        await _render_queue(message, city, 0, edit=False)
+        await _ask_queue_visa(message, city, edit=False)
     else:
         hint = "Не узнал город. " if command.args else ""
         await message.answer(
@@ -261,14 +274,24 @@ async def queue_pick_city(callback: CallbackQuery) -> None:
     if city not in CITIES:
         await callback.answer("Неизвестный город", show_alert=True)
         return
-    await _render_queue(callback.message, city, 0, edit=True)
+    await _ask_queue_visa(callback.message, city, edit=True)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("qvisa:"))
+async def queue_pick_visa(callback: CallbackQuery) -> None:
+    _, city, visa = callback.data.split(":", 2)
+    if city not in CITIES or visa not in VISA_TYPES:
+        await callback.answer("Неизвестная комбинация", show_alert=True)
+        return
+    await _render_queue(callback.message, city, visa, 0, edit=True)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("qpage:"))
 async def queue_page(callback: CallbackQuery) -> None:
-    _, city, offset = callback.data.split(":", 2)
-    await _render_queue(callback.message, city, int(offset), edit=True)
+    _, city, visa, offset = callback.data.split(":", 3)
+    await _render_queue(callback.message, city, visa, int(offset), edit=True)
     await callback.answer()
 
 
