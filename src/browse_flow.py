@@ -147,6 +147,131 @@ async def list_page(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+# ---------- /queue: очередь города в порядке постановки ----------
+
+QUEUE_PAGE = 15
+_VISA_SHORT = {
+    "D_OTHER": "D",
+    "D_WORK": "D·Work",
+    "D_DRIVER": "D·Driver",
+    "D_KARTA": "D·Карта",
+    "D_STUDENT": "D·Student",
+    "C_OTHER": "C",
+}
+
+
+def _queue_status(row) -> str:
+    if row["outcome"]:
+        return OUTCOME_LABELS[row["outcome"]].split()[0]  # ✅ / ❌
+    if row["passport_date"]:
+        return "🛂"
+    if row["submit_date"]:
+        return "📄"
+    if row["letter_date"]:
+        return f"✉️ {fmt(row['letter_date'])}"
+    return "⏳"
+
+
+def _fmt_queue_row(row, pos: int) -> str:
+    suspect = "⚠️" if row["suspect"] else ""
+    when = datetime.strptime(row["queue_date"], "%Y-%m-%d").strftime("%d.%m.%y")
+    if row["queue_time"]:
+        when += f" {row['queue_time']}"
+    if row["message_id"]:
+        when = f'<a href="{post_link(row["message_id"])}">{when}</a>'
+    visa = _VISA_SHORT.get(row["visa_type"], row["visa_type"])
+    return f"{pos}. {suspect}{when} · {visa} · {_queue_status(row)} · {user_label(row['username'], 'аноним')}"
+
+
+def _queue_city_kb() -> InlineKeyboardMarkup:
+    rows, row = [], []
+    for city in CITIES:
+        row.append(InlineKeyboardButton(text=city, callback_data=f"qcity:{city}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _render_queue(message: Message, city: str, offset: int, edit: bool) -> None:
+    rows = db.reports_by_city(city, offset, QUEUE_PAGE)
+    total = db.count_by_city(city)
+    if total == 0:
+        text = f"📜 <b>{city} — очередь по постановке</b>\n\nАнкет пока нет."
+    else:
+        lines = [f"📜 <b>{city} — очередь по постановке</b> · анкет: {total}", ""]
+        lines += [_fmt_queue_row(r, offset + i + 1) for i, r in enumerate(rows)]
+        lines.append("")
+        lines.append("<i>№ по дате постановки · тип · статус (✉️ письмо, 📄 подача, "
+                     "🛂 паспорт, ✅/❌ результат, ⏳ ждёт); дата — ссылка на публикацию</i>")
+        text = "\n".join(lines)
+
+    nav = []
+    if offset > 0:
+        nav.append(InlineKeyboardButton(
+            text="◀️ Назад", callback_data=f"qpage:{city}:{max(0, offset - QUEUE_PAGE)}"))
+    if offset + QUEUE_PAGE < total:
+        nav.append(InlineKeyboardButton(
+            text=f"▶️ Ещё ({total - offset - QUEUE_PAGE})",
+            callback_data=f"qpage:{city}:{offset + QUEUE_PAGE}"))
+    buttons = ([nav] if nav else []) + [
+        [InlineKeyboardButton(text="🔙 Другой город", callback_data="qback")]
+    ]
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    if edit:
+        await message.edit_text(text, reply_markup=kb, disable_web_page_preview=True)
+    else:
+        await message.answer(text, reply_markup=kb, disable_web_page_preview=True)
+
+
+def _resolve_city(arg: str | None) -> str | None:
+    if not arg:
+        return None
+    arg = arg.strip().lower()
+    return next((c for c in CITIES if c.lower() == arg), None)
+
+
+@router.message(Command("queue"), F.chat.type == "private")
+async def cmd_queue(message: Message, command: CommandObject) -> None:
+    city = _resolve_city(command.args)
+    if city:
+        await _render_queue(message, city, 0, edit=False)
+    else:
+        hint = "Не узнал город. " if command.args else ""
+        await message.answer(
+            f"{hint}Очередь какого города показать (по порядку постановки)?",
+            reply_markup=_queue_city_kb(),
+        )
+
+
+@router.callback_query(F.data == "qback")
+async def queue_back(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "Очередь какого города показать (по порядку постановки)?",
+        reply_markup=_queue_city_kb(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("qcity:"))
+async def queue_pick_city(callback: CallbackQuery) -> None:
+    city = callback.data.split(":", 1)[1]
+    if city not in CITIES:
+        await callback.answer("Неизвестный город", show_alert=True)
+        return
+    await _render_queue(callback.message, city, 0, edit=True)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("qpage:"))
+async def queue_page(callback: CallbackQuery) -> None:
+    _, city, offset = callback.data.split(":", 2)
+    await _render_queue(callback.message, city, int(offset), edit=True)
+    await callback.answer()
+
+
 # ---------- /near: люди рядом ----------
 
 NEAR_WINDOWS = (3, 7, 14)   # окно ±дней, расширяется, пока соседей мало

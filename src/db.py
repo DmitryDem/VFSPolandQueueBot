@@ -263,6 +263,24 @@ def recent_reports(city: str, visa_type: str, limit: int = 50) -> list[sqlite3.R
         ).fetchall()
 
 
+def reports_by_city(city: str, offset: int, limit: int) -> list[sqlite3.Row]:
+    """Страница анкет города (все типы визы) в порядке постановки в очередь."""
+    with _connect() as conn:
+        return conn.execute(
+            """SELECT * FROM reports WHERE city = ?
+               ORDER BY queue_date, COALESCE(queue_time, '99:99'), id
+               LIMIT ? OFFSET ?""",
+            (city, limit, offset),
+        ).fetchall()
+
+
+def count_by_city(city: str) -> int:
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM reports WHERE city = ?", (city,)
+        ).fetchone()[0]
+
+
 def reports_for(city: str, visa_type: str) -> list[sqlite3.Row]:
     """Все анкеты по городу и типу визы (для статистики)."""
     with _connect() as conn:

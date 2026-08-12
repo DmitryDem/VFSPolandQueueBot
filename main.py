@@ -138,6 +138,7 @@ async def main() -> None:
             BotCommand(command="mine", description="Моя анкета"),
             BotCommand(command="near", description="Люди рядом в очереди"),
             BotCommand(command="list", description="Анкеты по городу"),
+            BotCommand(command="queue", description="Очередь города по порядку постановки"),
             BotCommand(command="stats", description="Статистика и прогноз очереди"),
             BotCommand(command="my", description="Персональный прогноз по вашей дате"),
             BotCommand(command="docs", description="Документы, сборы, порядок подачи"),
