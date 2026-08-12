@@ -4,7 +4,7 @@
 (зеркалирование). Путь к SSH-ключу определяется автоматически, поэтому
 скрипт работает независимо от расположения репозитория.
 
-Локальная папка назначения: C:\\Work\\TelegramBotBackups
+Локальная папка назначения: C:\\Work\\PetProjects\\TelegramBotBackup
 Запуск: python scripts/fetch_backups.py
 """
 import sys
@@ -16,7 +16,7 @@ import paramiko
 HOST = "83.168.90.41"
 USER = "root"
 REMOTE_DIR = "/opt/vfsbot/backups"
-LOCAL_DIR = Path(r"C:\Work\TelegramBotBackups")
+LOCAL_DIR = Path(r"C:\Work\PetProjects\TelegramBotBackup")
 
 # ключ ищем относительно репозитория (этот файл лежит в <repo>/scripts/)
 KEY = Path(__file__).resolve().parent.parent / ".ssh" / "vfsbot_deploy"
