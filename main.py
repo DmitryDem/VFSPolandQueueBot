@@ -9,7 +9,10 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats, ErrorEvent, FSInputFile, InputMediaPhoto
+from aiogram.types import (
+    BotCommand, BotCommandScopeAllPrivateChats, ErrorEvent, FSInputFile,
+    InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto,
+)
 from dotenv import load_dotenv
 
 from src import stats
@@ -25,6 +28,9 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)  # не спамить
 log = logging.getLogger("main")
 
 DAILY_SUMMARY_HOUR = 9  # локальное время ежедневной сводки
+
+# Ссылка на группу — для кнопки под постами канала (канал ведёт в группу)
+GROUP_URL = "https://t.me/vfspolandstats"
 
 
 TELEGRAM_MSG_LIMIT = 4096
@@ -79,10 +85,13 @@ async def daily_summary_loop(bot: Bot) -> None:
                 log.info("Ежедневная сводка пропущена: данных нет")
                 continue
             paths = _render_ranking_charts()
+            channel_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="💬 Обсуждение и анкета — в группе", url=GROUP_URL)
+            ]])
             try:
                 await _publish_summary(bot, text, paths, CHAT_ID, stats_topic)
                 if channel_id:
-                    await _publish_summary(bot, text, paths, channel_id, None)
+                    await _publish_summary(bot, text, paths, channel_id, None, reply_markup=channel_kb)
             finally:
                 for p in paths:
                     Path(p).unlink(missing_ok=True)
@@ -107,10 +116,19 @@ def _render_ranking_charts() -> list[str]:
 
 
 async def _publish_summary(bot: Bot, text: str, chart_paths: list[str],
-                           chat_id: int | str, thread_id: int | None) -> None:
-    """Публикует текст сводки (с разбивкой) и графики в один адресат (тему или канал)."""
-    for chunk in _split_message(text):
-        await bot.send_message(chat_id=chat_id, message_thread_id=thread_id, text=chunk)
+                           chat_id: int | str, thread_id: int | None,
+                           reply_markup: InlineKeyboardMarkup | None = None) -> None:
+    """Публикует текст сводки (с разбивкой) и графики в один адресат (тему или канал).
+
+    reply_markup (если задан) вешается на последнее текстовое сообщение — так под
+    постом канала появляется кнопка-ссылка в группу.
+    """
+    chunks = _split_message(text)
+    for i, chunk in enumerate(chunks):
+        await bot.send_message(
+            chat_id=chat_id, message_thread_id=thread_id, text=chunk,
+            reply_markup=reply_markup if i == len(chunks) - 1 else None,
+        )
     if not chart_paths:
         return
     if len(chart_paths) == 1:
