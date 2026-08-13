@@ -53,11 +53,20 @@ def _split_message(text: str, limit: int = 3900) -> list[str]:
     return chunks
 
 
+def _channel_id() -> int | str | None:
+    """Публичный канал для дублирования сводки (опционально). ID (int) или @username."""
+    v = os.environ.get("CHANNEL_ID")
+    if not v:
+        return None
+    return int(v) if v.lstrip("-").isdigit() else v
+
+
 async def daily_summary_loop(bot: Bot) -> None:
     stats_topic = TOPICS["service_topics"].get("stats")
     if not stats_topic:
         log.warning("Тема «Статистика» не настроена — автосводка выключена")
         return
+    channel_id = _channel_id()
     while True:
         now = datetime.now()
         target = now.replace(hour=DAILY_SUMMARY_HOUR, minute=0, second=0, microsecond=0)
@@ -66,18 +75,23 @@ async def daily_summary_loop(bot: Bot) -> None:
         await asyncio.sleep((target - now).total_seconds())
         try:
             text = stats.build_daily_summary(CITIES, VISA_TYPES)
-            if text:
-                for chunk in _split_message(text):
-                    await bot.send_message(chat_id=CHAT_ID, message_thread_id=stats_topic, text=chunk)
-                await _send_ranking_charts(bot, stats_topic)
-                log.info("Ежедневная сводка опубликована")
-            else:
+            if not text:
                 log.info("Ежедневная сводка пропущена: данных нет")
+                continue
+            paths = _render_ranking_charts()
+            try:
+                await _publish_summary(bot, text, paths, CHAT_ID, stats_topic)
+                if channel_id:
+                    await _publish_summary(bot, text, paths, channel_id, None)
+            finally:
+                for p in paths:
+                    Path(p).unlink(missing_ok=True)
+            log.info("Ежедневная сводка опубликована%s", " (+канал)" if channel_id else "")
         except Exception:
             log.exception("Ошибка публикации ежедневной сводки")
 
 
-async def _send_ranking_charts(bot: Bot, stats_topic: int) -> None:
+def _render_ranking_charts() -> list[str]:
     """Рейтинг городов по медиане ожидания — по одному графику на категорию с данными."""
     paths = []
     for visa, label in VISA_TYPES.items():
@@ -89,19 +103,22 @@ async def _send_ranking_charts(bot: Bot, stats_topic: int) -> None:
         chart = stats.render_city_ranking(label, entries)
         if chart:
             paths.append(chart)
-    if not paths:
+    return paths
+
+
+async def _publish_summary(bot: Bot, text: str, chart_paths: list[str],
+                           chat_id: int | str, thread_id: int | None) -> None:
+    """Публикует текст сводки (с разбивкой) и графики в один адресат (тему или канал)."""
+    for chunk in _split_message(text):
+        await bot.send_message(chat_id=chat_id, message_thread_id=thread_id, text=chunk)
+    if not chart_paths:
         return
-    try:
-        if len(paths) == 1:
-            await bot.send_photo(
-                chat_id=CHAT_ID, message_thread_id=stats_topic, photo=FSInputFile(paths[0])
-            )
-        else:
-            media = [InputMediaPhoto(media=FSInputFile(p)) for p in paths]
-            await bot.send_media_group(chat_id=CHAT_ID, message_thread_id=stats_topic, media=media)
-    finally:
-        for p in paths:
-            Path(p).unlink(missing_ok=True)
+    if len(chart_paths) == 1:
+        await bot.send_photo(chat_id=chat_id, message_thread_id=thread_id,
+                             photo=FSInputFile(chart_paths[0]))
+    else:
+        media = [InputMediaPhoto(media=FSInputFile(p)) for p in chart_paths]
+        await bot.send_media_group(chat_id=chat_id, message_thread_id=thread_id, media=media)
 
 
 # безобидные ошибки Telegram: гасим тихо, чтобы не засорять лог и не рвать обработчик
