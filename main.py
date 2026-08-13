@@ -120,23 +120,25 @@ async def _publish_summary(bot: Bot, text: str, chart_paths: list[str],
                            reply_markup: InlineKeyboardMarkup | None = None) -> None:
     """Публикует текст сводки (с разбивкой) и графики в один адресат (тему или канал).
 
-    reply_markup (если задан) вешается на последнее текстовое сообщение — так под
-    постом канала появляется кнопка-ссылка в группу.
+    reply_markup (если задан) отправляется отдельным финальным сообщением ПОСЛЕ
+    графиков — так кнопка-ссылка в группу оказывается в самом низу поста (медиа-группа
+    свои кнопки нести не может).
     """
-    chunks = _split_message(text)
-    for i, chunk in enumerate(chunks):
+    for chunk in _split_message(text):
+        await bot.send_message(chat_id=chat_id, message_thread_id=thread_id, text=chunk)
+    if chart_paths:
+        if len(chart_paths) == 1:
+            await bot.send_photo(chat_id=chat_id, message_thread_id=thread_id,
+                                 photo=FSInputFile(chart_paths[0]))
+        else:
+            media = [InputMediaPhoto(media=FSInputFile(p)) for p in chart_paths]
+            await bot.send_media_group(chat_id=chat_id, message_thread_id=thread_id, media=media)
+    if reply_markup:
         await bot.send_message(
-            chat_id=chat_id, message_thread_id=thread_id, text=chunk,
-            reply_markup=reply_markup if i == len(chunks) - 1 else None,
+            chat_id=chat_id, message_thread_id=thread_id,
+            text="💬 Вопросы, обсуждение и заполнение анкеты — в нашей группе 👇",
+            reply_markup=reply_markup, disable_web_page_preview=True,
         )
-    if not chart_paths:
-        return
-    if len(chart_paths) == 1:
-        await bot.send_photo(chat_id=chat_id, message_thread_id=thread_id,
-                             photo=FSInputFile(chart_paths[0]))
-    else:
-        media = [InputMediaPhoto(media=FSInputFile(p)) for p in chart_paths]
-        await bot.send_media_group(chat_id=chat_id, message_thread_id=thread_id, media=media)
 
 
 # безобидные ошибки Telegram: гасим тихо, чтобы не засорять лог и не рвать обработчик
