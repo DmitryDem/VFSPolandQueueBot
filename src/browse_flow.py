@@ -290,8 +290,12 @@ async def queue_pick_visa(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("qpage:"))
 async def queue_page(callback: CallbackQuery) -> None:
-    _, city, visa, offset = callback.data.split(":", 3)
-    await _render_queue(callback.message, city, visa, int(offset), edit=True)
+    parts = callback.data.split(":")
+    # защита от «протухших» кнопок старого формата (qpage:city:offset — 3 части)
+    if len(parts) != 4 or parts[1] not in CITIES or parts[2] not in VISA_TYPES or not parts[3].isdigit():
+        await callback.answer("Список устарел — откройте /queue заново", show_alert=True)
+        return
+    await _render_queue(callback.message, parts[1], parts[2], int(parts[3]), edit=True)
     await callback.answer()
 
 
