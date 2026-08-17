@@ -421,11 +421,93 @@ def build_personal_forecast(
     return "\n".join(lines)
 
 
+# ---------- прогноз раздач приглашений по городам ----------
+
+_WD_FULL = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
+_WD_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+WAVE_MIN_LETTERS = 3    # меньше писем по городу — «данных мало», не прогнозируем
+WAVE_MAX_UPCOMING = 4   # сколько ближайших дат раздач показать
+
+
+def _city_cadence(dates: list[date]) -> tuple[int, int, date] | None:
+    """(день недели, интервал 7/14, дата последней волны) или None, если ритм не выделяется.
+
+    Волны — дни, где писем >=2 (гасим одиночный шум). Ритм — по последнему интервалу
+    между волнами того же дня недели (свежее поведение важнее старого).
+    """
+    daycnt = Counter(dates)
+    waves = sorted([d for d, n in daycnt.items() if n >= 2]) or sorted(set(dates))
+    wd = Counter(d.weekday() for d in waves).most_common(1)[0][0]
+    same = [d for d in waves if d.weekday() == wd]
+    gaps = [(same[i + 1] - same[i]).days for i in range(len(same) - 1)]
+    if not gaps:
+        return None
+    last_gap, mid = gaps[-1], median(gaps)
+    if last_gap <= 8 or mid <= 8:
+        interval = 7
+    elif 12 <= last_gap <= 16 or 12 <= mid <= 16:
+        interval = 14
+    else:
+        return None
+    return wd, interval, max(same)
+
+
+def build_wave_forecast(cities: list[str], today: date | None = None) -> str | None:
+    """Блок «сегодня/ближайшие раздачи приглашений по городам» из фактических данных."""
+    today = today or date.today()
+    dates_by: dict[str, list[date]] = {}
+    for r in db.letters_for_waves():
+        try:
+            dt = _d(r["letter_date"])
+        except (TypeError, ValueError):
+            continue
+        dates_by.setdefault(r["city"], []).append(dt)
+
+    today_cities: list[str] = []
+    upcoming: dict[date, list[str]] = {}
+    for city in cities:
+        ds = dates_by.get(city, [])
+        if len(ds) < WAVE_MIN_LETTERS:
+            continue
+        cad = _city_cadence(ds)
+        if not cad:
+            continue
+        wd, interval, last = cad
+        if today.weekday() == wd and today >= last and (today - last).days % interval == 0:
+            today_cities.append(city)
+            continue
+        nd = last
+        while nd < today:
+            nd += timedelta(days=interval)
+        upcoming.setdefault(nd, []).append(city)
+
+    if not today_cities and not upcoming:
+        return None
+    lines = []
+    if today_cities:
+        lines.append(
+            f"📬 <b>Сегодня ({_WD_FULL[today.weekday()]}) ожидается раздача приглашений:</b> "
+            + " · ".join(today_cities) + "."
+        )
+    else:
+        lines.append("📭 <b>Сегодня раздача приглашений обычно не ожидается.</b>")
+    if upcoming:
+        lines.append("📅 <b>Ближайшие ожидаемые раздачи:</b>")
+        for nd in sorted(upcoming)[:WAVE_MAX_UPCOMING]:
+            lines.append(f"• {nd.strftime('%d.%m')} ({_WD_SHORT[nd.weekday()]}) — {', '.join(upcoming[nd])}")
+    lines.append("<i>Ориентир по статистике участников, не гарантия.</i>")
+    return "\n".join(lines)
+
+
 def build_daily_summary(
     cities: list[str], visa_types: dict[str, str], today: date | None = None
 ) -> str | None:
     today = today or date.today()
     lines = [f"📊 <b>Сводка очереди на {_fmt(today)}</b>", ""]
+    forecast = build_wave_forecast(cities, today)
+    if forecast:
+        lines.append(forecast)
+        lines.append("")
     has_data = False
     for city in cities:
         for visa, label in visa_types.items():

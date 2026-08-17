@@ -292,6 +292,15 @@ def reports_by_city_visa(city: str, visa_type: str, offset: int, limit: int) -> 
         ).fetchall()
 
 
+def letters_for_waves() -> list[sqlite3.Row]:
+    """(city, letter_date) всех пришедших приглашений (без сомнительных) — для прогноза раздач."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT city, letter_date FROM reports "
+            "WHERE letter_date IS NOT NULL AND (suspect IS NULL OR suspect = 0)"
+        ).fetchall()
+
+
 def reports_for(city: str, visa_type: str) -> list[sqlite3.Row]:
     """Все анкеты по городу и типу визы (для статистики)."""
     with _connect() as conn:
