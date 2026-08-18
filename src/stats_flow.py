@@ -103,6 +103,26 @@ def _visa_kb(prefix: str, city: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+# ---------- /wait: сроки ожидания приглашения (общие) ----------
+
+@router.message(Command("wait"))
+async def cmd_wait(message: Message) -> None:
+    text = stats.wait_summary_text()
+    if not text:
+        await message.answer("Пока мало данных, чтобы оценить сроки ожидания.")
+        return
+    await message.answer(text)
+    paths = stats.render_wait_charts()
+    if not paths:
+        return
+    try:
+        media = [InputMediaPhoto(media=FSInputFile(p)) for p in paths]
+        await message.answer_media_group(media)
+    finally:
+        for p in paths:
+            os.unlink(p)
+
+
 # ---------- /stats ----------
 
 @router.message(Command("stats"))

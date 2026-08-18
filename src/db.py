@@ -39,6 +39,11 @@ CREATE TABLE IF NOT EXISTS events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_created ON events (created_at);
+CREATE TABLE IF NOT EXISTS membership (
+    user_id INTEGER PRIMARY KEY,
+    in_group INTEGER NOT NULL,        -- 1 = в группе, 0 = ушёл/не участник
+    checked_at TEXT NOT NULL
+);
 """
 
 _MIGRATIONS = [
@@ -290,6 +295,38 @@ def reports_by_city_visa(city: str, visa_type: str, offset: int, limit: int) -> 
                LIMIT ? OFFSET ?""",
             (city, visa_type, limit, offset),
         ).fetchall()
+
+
+def reports_for_survival() -> list[sqlite3.Row]:
+    """Данные для анализа выживаемости: (user_id, visa_type, queue_date, letter_date, suspect)."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT user_id, visa_type, queue_date, letter_date, COALESCE(suspect,0) AS suspect "
+            "FROM reports"
+        ).fetchall()
+
+
+def waiting_user_ids() -> list[int]:
+    """user_id всех, у кого есть ожидающая (без письма) анкета — их членство важно для цензурирования."""
+    with _connect() as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT DISTINCT user_id FROM reports WHERE letter_date IS NULL AND COALESCE(suspect,0)=0"
+        ).fetchall()]
+
+
+def set_membership(user_id: int, in_group: bool) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO membership (user_id, in_group, checked_at) VALUES (?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET in_group=excluded.in_group, checked_at=excluded.checked_at",
+            (user_id, 1 if in_group else 0, _now()),
+        )
+
+
+def left_user_ids() -> set[int]:
+    """user_id, помеченные как ушедшие (in_group=0)."""
+    with _connect() as conn:
+        return {r[0] for r in conn.execute("SELECT user_id FROM membership WHERE in_group=0").fetchall()}
 
 
 def letters_for_waves() -> list[sqlite3.Row]:

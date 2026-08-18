@@ -742,3 +742,154 @@ def render_city_ranking(
     ax.invert_yaxis()
     ax.set_xlim(0, xmax * 1.15)
     return _save(fig, f"срез {_fmt(today)}")
+
+
+# ---------- сроки ожидания приглашения (анализ выживаемости) ----------
+
+_SURV_GROUPS = [("Все", None), ("Шенген C", "C_OTHER"), ("D (Work)", "D_WORK"), ("D (Other)", "D_OTHER")]
+_SURV_COLORS = {"Все": BLUE, "Шенген C": "#e0871e", "D (Work)": GREEN, "D (Other)": "#cc2b3a"}
+
+
+def _try_d(s):
+    try:
+        return _d(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def _survival_pairs(rows, left_ids, today, visa=None):
+    """(times, events): событие=получил письмо (time=ожидание); цензор=ждёт и в группе
+    (time=сегодня−постановка). Ждущие, ушедшие из группы, отбрасываются (мёртвые анкеты)."""
+    times, events = [], []
+    for r in rows:
+        if r["suspect"]:
+            continue
+        if visa and r["visa_type"] != visa:
+            continue
+        q = _try_d(r["queue_date"])
+        if not q:
+            continue
+        if r["letter_date"]:
+            l = _try_d(r["letter_date"])
+            if not l:
+                continue
+            w = (l - q).days
+            if w >= 0:
+                times.append(w); events.append(1)
+        else:
+            if r["user_id"] in left_ids:
+                continue
+            w = (today - q).days
+            if w >= 0:
+                times.append(w); events.append(0)
+    return times, events
+
+
+def _km_curve(times, events):
+    """Каплан–Мейер: [(t, S(t))], S — доля ещё ожидающих."""
+    data = sorted(zip(times, events))
+    S = 1.0
+    curve = [(0, 1.0)]
+    for t in sorted({tt for tt, ee in data if ee == 1}):
+        n_risk = sum(1 for tt, _ in data if tt >= t)
+        d = sum(1 for tt, ee in data if tt == t and ee == 1)
+        if n_risk:
+            S *= (1 - d / n_risk)
+        curve.append((t, S))
+    return curve
+
+
+def _completed_curve(times, events):
+    """Эмпирическая CDF ожидания среди получивших письмо: [(t, доля 0..1)]."""
+    ev = sorted(t for t, e in zip(times, events) if e == 1)
+    n = len(ev)
+    curve = [(0, 0.0)]
+    for i, t in enumerate(ev, 1):
+        curve.append((t, i / n))
+    return curve
+
+
+def _km_median(curve):
+    for t, S in curve:
+        if S <= 0.5:
+            return t
+    return None
+
+
+def _render_wait(mode, rows, left_ids, today):
+    fig, ax = _fig(5.0)
+    title = ("Сроки получения приглашения — только по получившим письмо"
+             if mode == "completed"
+             else "Сроки получения приглашения — с учётом ожидающих (Каплан–Мейер)")
+    _style(ax, title)
+    ax.grid(axis="x", color=GRID, linewidth=0.8)
+    plotted = 0
+    for label, vt in _SURV_GROUPS:
+        times, events = _survival_pairs(rows, left_ids, today, vt)
+        n_ev = sum(events)
+        if n_ev < 3:
+            continue
+        if mode == "completed":
+            curve = _completed_curve(times, events)
+            xs = [p[0] for p in curve]; ys = [p[1] * 100 for p in curve]
+        else:
+            curve = _km_curve(times, events)
+            xs = [p[0] for p in curve]; ys = [(1 - p[1]) * 100 for p in curve]
+        ax.step(xs, ys, where="post", color=_SURV_COLORS.get(label, INK),
+                linewidth=2, zorder=3, label=f"{label} (n={n_ev})")
+        plotted += 1
+    if not plotted:
+        plt.close(fig)
+        return None
+    ax.set_xlabel("Дней с постановки в очередь")
+    ax.set_ylabel("Получили приглашение, %")
+    ax.set_ylim(0, 100)
+    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    foot = ("только те, кому письмо уже пришло — срок занижен"
+            if mode == "completed"
+            else "ждущие учтены; ушедшие из группы исключены; оценка предварительная")
+    return _save(fig, foot)
+
+
+def render_wait_charts(today: date | None = None) -> list[str]:
+    """Два графика: по получившим письмо и Каплан–Мейер (с ожидающими)."""
+    today = today or date.today()
+    rows = db.reports_for_survival()
+    left = db.left_user_ids()
+    out = []
+    for mode in ("completed", "km"):
+        p = _render_wait(mode, rows, left, today)
+        if p:
+            out.append(p)
+    return out
+
+
+def wait_summary_text(today: date | None = None) -> str | None:
+    today = today or date.today()
+    rows = db.reports_for_survival()
+    left = db.left_user_ids()
+    t, e = _survival_pairs(rows, left, today, None)
+    n_ev = sum(e)
+    if n_ev < 5:
+        return None
+    n_cens = len(e) - n_ev
+    naive = median([tt for tt, ee in zip(t, e) if ee == 1])
+    curve = _km_curve(t, e)
+    km_med = _km_median(curve)
+
+    def pct_at(day):
+        val = 0.0
+        for tt, S in curve:
+            if tt <= day:
+                val = (1 - S) * 100
+        return round(val)
+
+    km_txt = f"{km_med} дн" if km_med is not None else f">{max(t)} дн (не достигнута)"
+    return (
+        "⏳ <b>Сроки ожидания приглашения</b> (все типы виз)\n"
+        f"• по получившим письмо: медиана <b>{naive:.0f} дн</b>\n"
+        f"• с учётом ожидающих (Каплан–Мейер): медиана <b>{km_txt}</b>\n"
+        f"• получили приглашение: к 40 дням ~{pct_at(40)}%, к 60 дням ~{pct_at(60)}%\n"
+        f"<i>Наблюдений: {n_ev} с письмом + {n_cens} ожидающих. "
+        "Данные молодые — оценка предварительная.</i>"
+    )

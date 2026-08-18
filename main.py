@@ -84,7 +84,7 @@ async def daily_summary_loop(bot: Bot) -> None:
             if not text:
                 log.info("Ежедневная сводка пропущена: данных нет")
                 continue
-            paths = _render_ranking_charts()
+            paths = _render_ranking_charts() + stats.render_wait_charts()
             channel_kb = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="💬 Обсуждение и анкета — в группе", url=GROUP_URL)
             ]])
@@ -98,6 +98,38 @@ async def daily_summary_loop(bot: Bot) -> None:
             log.info("Ежедневная сводка опубликована%s", " (+канал)" if channel_id else "")
         except Exception:
             log.exception("Ошибка публикации ежедневной сводки")
+
+
+async def membership_refresh_loop(bot: Bot) -> None:
+    """Раз в сутки (08:30) обновляет членство ожидающих: ушедшие исключаются из KM-оценки."""
+    from src import db
+
+    while True:
+        now = datetime.now()
+        target = now.replace(hour=8, minute=30, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        await asyncio.sleep((target - now).total_seconds())
+        try:
+            uids = db.waiting_user_ids()
+            checked = left = 0
+            for uid in uids:
+                try:
+                    m = await bot.get_chat_member(CHAT_ID, uid)
+                    st = m.status
+                    in_group = st not in ("left", "kicked") and not (
+                        st == "restricted" and getattr(m, "is_member", True) is False
+                    )
+                    db.set_membership(uid, in_group)
+                    checked += 1
+                    if not in_group:
+                        left += 1
+                except Exception:
+                    pass
+                await asyncio.sleep(0.12)
+            log.info("Членство обновлено: проверено %d, ушедших %d", checked, left)
+        except Exception:
+            log.exception("Ошибка обновления членства")
 
 
 def _render_ranking_charts() -> list[str]:
@@ -177,6 +209,7 @@ async def main() -> None:
             BotCommand(command="list", description="Анкеты по городу"),
             BotCommand(command="queue", description="Очередь города по порядку постановки"),
             BotCommand(command="stats", description="Статистика и прогноз очереди"),
+            BotCommand(command="wait", description="Сроки ожидания приглашения (графики)"),
             BotCommand(command="my", description="Персональный прогноз по вашей дате"),
             BotCommand(command="docs", description="Документы, сборы, порядок подачи"),
             BotCommand(command="cancel", description="Отменить текущую анкету"),
@@ -185,6 +218,7 @@ async def main() -> None:
     )
     await bot.delete_webhook(drop_pending_updates=False)
     asyncio.create_task(daily_summary_loop(bot))
+    asyncio.create_task(membership_refresh_loop(bot))
     await dp.start_polling(bot)
 
 
