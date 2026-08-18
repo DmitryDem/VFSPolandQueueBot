@@ -10,7 +10,7 @@
   "cities": {
     "Гомель": { "D_OTHER": 9, "D_DRIVER": 11, "D_WORK": 4, "D_STUDENT": 1421, "C_OTHER": 16 },
     "Минск": { "D_OTHER": 26, "D_DRIVER": 28, "D_WORK": 103, "D_STUDENT": 1426, "C_OTHER": 30 },
-    "Могилев": { "D_OTHER": 32, "D_DRIVER": 34, "D_WORK": 106, "C_OTHER": 36 },
+    "Могилев": { "D_OTHER": 32, "D_DRIVER": 34, "D_WORK": 106, "D_STUDENT": 3221, "C_OTHER": 36 },
     "Барановичи": { "D_OTHER": 38, "D_DRIVER": 40, "D_WORK": 109, "C_OTHER": 42 },
     "Пинск": { "D_OTHER": 44, "D_DRIVER": 46, "D_WORK": 112, "C_OTHER": 56 },
     "Брест": { "D_OTHER": 57, "D_DRIVER": 58, "D_WORK": 115, "C_OTHER": 59 },
