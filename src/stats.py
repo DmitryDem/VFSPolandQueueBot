@@ -820,7 +820,7 @@ def _render_wait(mode, rows, left_ids, today):
     fig, ax = _fig(5.0)
     title = ("Сроки получения приглашения — только по получившим письмо"
              if mode == "completed"
-             else "Сроки получения приглашения — с учётом ожидающих (Каплан–Мейер)")
+             else "Сроки получения приглашения по типам виз (Каплан–Мейер)")
     _style(ax, title)
     ax.grid(axis="x", color=GRID, linewidth=0.8)
     plotted = 0
@@ -851,16 +851,48 @@ def _render_wait(mode, rows, left_ids, today):
     return _save(fig, foot)
 
 
+def _render_wait_compare(rows, left_ids, today):
+    """Один график: «по получившим» vs «с учётом ожидающих (KM)» + медианы пунктиром."""
+    times, events = _survival_pairs(rows, left_ids, today, None)
+    if sum(events) < 5:
+        return None
+    comp = _completed_curve(times, events)
+    km = _km_curve(times, events)
+    naive = median([t for t, e in zip(times, events) if e == 1])
+    km_med = _km_median(km)
+
+    fig, ax = _fig(5.0)
+    _style(ax, "Сроки приглашения: по получившим vs с учётом ожидающих")
+    ax.grid(axis="x", color=GRID, linewidth=0.8)
+    ax.step([p[0] for p in comp], [p[1] * 100 for p in comp], where="post",
+            color=BLUE, linewidth=2, zorder=3, label="только по получившим")
+    ax.step([p[0] for p in km], [(1 - p[1]) * 100 for p in km], where="post",
+            color="#cc2b3a", linewidth=2, zorder=3, label="с учётом ожидающих (KM)")
+    ax.axhline(50, color=NEUTRAL, ls="--", lw=1, zorder=1)
+    ax.axvline(naive, color=BLUE, ls=":", lw=1.4, zorder=2)
+    ax.text(naive, 94, f"медиана {naive:.0f} дн", color=BLUE, fontsize=8.5, ha="center")
+    if km_med is not None:
+        ax.axvline(km_med, color="#cc2b3a", ls=":", lw=1.4, zorder=2)
+        ax.text(km_med, 86, f"медиана {km_med} дн", color="#cc2b3a", fontsize=8.5, ha="center")
+    ax.set_xlabel("Дней с постановки в очередь")
+    ax.set_ylabel("Получили приглашение, %")
+    ax.set_ylim(0, 100)
+    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    return _save(fig, "пунктир — медианы (50% получили); линия KM правее = реальный срок дольше")
+
+
 def render_wait_charts(today: date | None = None) -> list[str]:
-    """Два графика: по получившим письмо и Каплан–Мейер (с ожидающими)."""
+    """Сравнительный график (получившие vs с ожидающими) + KM по типам виз."""
     today = today or date.today()
     rows = db.reports_for_survival()
     left = db.left_user_ids()
     out = []
-    for mode in ("completed", "km"):
-        p = _render_wait(mode, rows, left, today)
-        if p:
-            out.append(p)
+    compare = _render_wait_compare(rows, left, today)
+    if compare:
+        out.append(compare)
+    by_type = _render_wait("km", rows, left, today)
+    if by_type:
+        out.append(by_type)
     return out
 
 
