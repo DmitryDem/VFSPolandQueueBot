@@ -845,10 +845,7 @@ def _render_wait(mode, rows, left_ids, today):
     ax.set_ylabel("Получили приглашение, %")
     ax.set_ylim(0, 100)
     ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
-    foot = ("только те, кому письмо уже пришло — срок занижен"
-            if mode == "completed"
-            else "ждущие учтены; ушедшие из группы исключены; оценка предварительная")
-    return _save(fig, foot)
+    return _save(fig, "оценка предварительная")
 
 
 def _render_wait_compare(rows, left_ids, today):
@@ -878,7 +875,7 @@ def _render_wait_compare(rows, left_ids, today):
     ax.set_ylabel("Получили приглашение, %")
     ax.set_ylim(0, 100)
     ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
-    return _save(fig, "пунктир — медианы (50% получили); линия KM правее = реальный срок дольше")
+    return _save(fig, "оценка предварительная")
 
 
 def render_wait_charts(today: date | None = None) -> list[str]:

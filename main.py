@@ -84,7 +84,7 @@ async def daily_summary_loop(bot: Bot) -> None:
             if not text:
                 log.info("Ежедневная сводка пропущена: данных нет")
                 continue
-            paths = _render_ranking_charts() + stats.render_wait_charts()
+            paths = _render_ranking_charts()
             channel_kb = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="💬 Обсуждение и анкета — в группе", url=GROUP_URL)
             ]])
