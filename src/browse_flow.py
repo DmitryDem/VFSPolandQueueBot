@@ -246,6 +246,20 @@ async def _ask_queue_visa(message: Message, city: str, edit: bool) -> None:
         await message.answer(text, reply_markup=_queue_visa_kb(city))
 
 
+@router.message(CommandStart(deep_link=True, magic=F.args.startswith("q_")))
+async def queue_deeplink(message: Message, command: CommandObject, state: FSMContext) -> None:
+    """Кнопка «Очередь по постановке» из темы группы: сразу список по городу/категории."""
+    await state.clear()
+    parts = (command.args or "").split("_", 2)
+    if len(parts) == 3 and parts[1].isdigit() and int(parts[1]) < len(CITIES) and parts[2] in VISA_TYPES:
+        await _render_queue(message, CITIES[int(parts[1])], parts[2], 0, edit=False)
+    else:
+        await message.answer(
+            "Не понял ссылку. Очередь по постановке — /queue",
+            reply_markup=_queue_city_kb(),
+        )
+
+
 @router.message(Command("queue"), F.chat.type == "private")
 async def cmd_queue(message: Message, command: CommandObject) -> None:
     city = _resolve_city(command.args)

@@ -193,7 +193,10 @@ def post_kb(bot_username: str, city: str, visa_type: str) -> InlineKeyboardMarku
             InlineKeyboardButton(text="📝 Анкета", url=f"{base}r_{idx}_{visa_type}"),
             InlineKeyboardButton(text="📊 Статистика", url=f"{base}s_{idx}_{visa_type}"),
             InlineKeyboardButton(text="🔮 Прогноз", url=f"{base}m_{idx}_{visa_type}"),
-        ]
+        ],
+        [
+            InlineKeyboardButton(text="📜 Очередь по постановке", url=f"{base}q_{idx}_{visa_type}"),
+        ],
     )
 
 
