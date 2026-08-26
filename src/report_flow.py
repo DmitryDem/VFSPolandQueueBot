@@ -1427,8 +1427,10 @@ async def _announce_invite(bot, report_id: int, data: dict, username: str | None
         "📬 <b>Пришло приглашение!</b>",
         f"🏙 {data['city']} · 📄 {VISA_TYPES.get(data['visa_type'], data['visa_type'])}",
         f"⏳ Очередь {when} → 📬 письмо {fmt(data['letter_date'])}{wtxt}",
-        f"👤 {user_label(username, first_name or 'аноним')}",
     ]
+    if data.get("queue_num"):
+        lines.append(f"🔢 Номер очереди: PLB {data['queue_num']}…")
+    lines.append(f"👤 {user_label(username, first_name or 'аноним')}")
     kb = None
     if message_id:
         kb = _kb([InlineKeyboardButton(text="👀 Анкета", url=post_link(message_id))])
