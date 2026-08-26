@@ -153,15 +153,14 @@ QUEUE_PAGE = 15
 
 
 def _queue_status(row) -> str:
-    if row["outcome"]:
-        return OUTCOME_LABELS[row["outcome"]].split()[0]  # ✅ / ❌
-    if row["passport_date"]:
-        return "🛂"
-    if row["submit_date"]:
-        return "📄"
+    """Для очереди по постановке важна только дата письма-приглашения в ВЦ.
+
+    Дальнейшие статусы (подача, паспорт, виза/отказ) намеренно не показываем —
+    они лишь загораживают дату приглашения.
+    """
     if row["letter_date"]:
         return f"✉️ {fmt(row['letter_date'])}"
-    return "⏳"
+    return "⏳ ждёт"
 
 
 def _fmt_queue_row(row, pos: int) -> str:
@@ -208,8 +207,8 @@ async def _render_queue(message: Message, city: str, visa: str, offset: int, edi
         lines = [f"📜 <b>{city} — {label}</b> · очередь по постановке · анкет: {total}", ""]
         lines += [_fmt_queue_row(r, offset + i + 1) for i, r in enumerate(rows)]
         lines.append("")
-        lines.append("<i>№ по дате постановки · статус (✉️ письмо, 📄 подача, "
-                     "🛂 паспорт, ✅/❌ результат, ⏳ ждёт); дата — ссылка на публикацию</i>")
+        lines.append("<i>№ по дате постановки · ✉️ дата письма-приглашения в ВЦ "
+                     "(⏳ ждёт — письма ещё нет); дата постановки — ссылка на публикацию</i>")
         text = "\n".join(lines)
 
     nav = []
