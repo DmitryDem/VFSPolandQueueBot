@@ -23,6 +23,7 @@ TOPICS = json.loads(
 )
 CHAT_ID = TOPICS["chat_id"]
 CITIES = list(TOPICS["cities"].keys())
+INVITES_TOPIC = TOPICS.get("service_topics", {}).get("invites")
 
 VISA_TYPES = {
     "D_OTHER": "Национальная D (Other)",
@@ -1307,6 +1308,11 @@ async def confirm_yes(callback: CallbackQuery, state: FSMContext) -> None:
         "в любой момент: /report",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
+    if data.get("letter_date"):
+        await _announce_invite(
+            callback.bot, report_id, data, user.username, user.first_name,
+            posted.message_id if tid else None,
+        )
     await _post_save_hooks(callback.bot, data["city"], data["visa_type"], data.get("letter_date"))
     await state.clear()
     await callback.answer()
@@ -1398,6 +1404,43 @@ async def _post_save_hooks(bot, city: str, visa_type: str, letter_iso: str | Non
     stats.note_write(city, visa_type)
 
 
+async def _announce_invite(bot, report_id: int, data: dict, username: str | None,
+                           first_name: str, message_id: int | None) -> None:
+    """Публикует анкету в тему-ленту «Получили приглашение» — один раз, при появлении письма.
+
+    Обновления анкеты сюда не идут: флаг invite_announced ставится после первой публикации.
+    """
+    if not INVITES_TOPIC or not data.get("letter_date"):
+        return
+    try:
+        waited = (
+            datetime.strptime(data["letter_date"], "%Y-%m-%d").date()
+            - datetime.strptime(data["queue_date"], "%Y-%m-%d").date()
+        ).days
+    except Exception:
+        waited = None
+    wtxt = f" (ждали {waited} дн.)" if waited is not None else ""
+    lines = [
+        "📬 <b>Пришло приглашение!</b>",
+        f"🏙 {data['city']} · 📄 {VISA_TYPES.get(data['visa_type'], data['visa_type'])}",
+        f"⏳ Очередь {fmt(data['queue_date'])} → 📬 письмо {fmt(data['letter_date'])}{wtxt}",
+        f"👤 {user_label(username, first_name or 'аноним')}",
+    ]
+    kb = None
+    if message_id:
+        kb = _kb([InlineKeyboardButton(text="👀 Анкета", url=post_link(message_id))])
+    try:
+        await bot.send_message(
+            chat_id=CHAT_ID, message_thread_id=INVITES_TOPIC,
+            text="\n".join(lines), reply_markup=kb,
+        )
+        db.mark_invite_announced(report_id)
+    except Exception:
+        logging.getLogger("report_flow").exception(
+            "не удалось опубликовать приглашение report=%s", report_id
+        )
+
+
 async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> None:
     """Обновляет отчёт и сообщение бота в теме (или переносит его в другую тему)."""
     user = callback.from_user
@@ -1470,4 +1513,12 @@ async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> N
     )
     if moved:
         stats.note_write(old["city"], old["visa_type"])
+    try:
+        already_announced = old["invite_announced"] or 0
+    except (KeyError, IndexError):
+        already_announced = 0
+    if data.get("letter_date") and not already_announced:
+        await _announce_invite(
+            callback.bot, editing_id, data, user.username, user.first_name, final_message_id
+        )
     await _post_save_hooks(callback.bot, data["city"], data["visa_type"], data.get("letter_date"))

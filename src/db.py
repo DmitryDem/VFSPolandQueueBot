@@ -65,6 +65,8 @@ _MIGRATIONS = [
     "ALTER TABLE reports ADD COLUMN label TEXT",
     # первые 6 цифр номера очереди (после префикса PLB); инкрементальны — для оценки размера очереди
     "ALTER TABLE reports ADD COLUMN queue_num TEXT",
+    # 1 = о получении письма-приглашения уже опубликовано в тему-ленту (публикуем один раз)
+    "ALTER TABLE reports ADD COLUMN invite_announced INTEGER DEFAULT 0",
 ]
 
 
@@ -209,6 +211,12 @@ def update_city_type(report_id: int, city: str, visa_type: str) -> None:
 def set_message_id(report_id: int, message_id: int) -> None:
     with _connect() as conn:
         conn.execute("UPDATE reports SET message_id = ? WHERE id = ?", (message_id, report_id))
+
+
+def mark_invite_announced(report_id: int) -> None:
+    """Отмечает, что о получении письма уже опубликовано в тему-ленту (один раз)."""
+    with _connect() as conn:
+        conn.execute("UPDATE reports SET invite_announced = 1 WHERE id = ?", (report_id,))
 
 
 def get_report(report_id: int) -> sqlite3.Row | None:
