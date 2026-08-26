@@ -1420,10 +1420,13 @@ async def _announce_invite(bot, report_id: int, data: dict, username: str | None
     except Exception:
         waited = None
     wtxt = f" (ждали {waited} дн.)" if waited is not None else ""
+    when = fmt(data["queue_date"])
+    if data.get("queue_time"):
+        when += f" в {data['queue_time']}"
     lines = [
         "📬 <b>Пришло приглашение!</b>",
         f"🏙 {data['city']} · 📄 {VISA_TYPES.get(data['visa_type'], data['visa_type'])}",
-        f"⏳ Очередь {fmt(data['queue_date'])} → 📬 письмо {fmt(data['letter_date'])}{wtxt}",
+        f"⏳ Очередь {when} → 📬 письмо {fmt(data['letter_date'])}{wtxt}",
         f"👤 {user_label(username, first_name or 'аноним')}",
     ]
     kb = None
