@@ -518,8 +518,6 @@ def build_daily_summary(
             parts = [f"анкет {s.total}"]
             if s.median_wait is not None:
                 parts.append(f"медиана {s.median_wait} дн.")
-            if s.velocity is not None:
-                parts.append(f"~{s.velocity:.1f}/день{_trend_arrow(s.velocity, s.velocity_prev)}")
             if s.last_letter and s.front_queue_date:
                 front = s.front_queue_date.strftime("%d.%m")
                 if s.front_queue_time:
