@@ -1418,14 +1418,8 @@ async def _post_save_hooks(bot, city: str, visa_type: str, letter_iso: str | Non
     stats.note_write(city, visa_type)
 
 
-async def _announce_invite(bot, report_id: int, data: dict, username: str | None,
-                           first_name: str, message_id: int | None) -> None:
-    """Публикует анкету в тему-ленту «Получили приглашение» — один раз, при появлении письма.
-
-    Обновления анкеты сюда не идут: флаг invite_announced ставится после первой публикации.
-    """
-    if not INVITES_TOPIC or not data.get("letter_date"):
-        return
+def _invite_text_kb(data: dict, username: str | None, first_name: str, message_id: int | None):
+    """Собирает текст и клавиатуру записи для ленты «Получили приглашение»."""
     try:
         waited = (
             datetime.strptime(data["letter_date"], "%Y-%m-%d").date()
@@ -1448,15 +1442,41 @@ async def _announce_invite(bot, report_id: int, data: dict, username: str | None
     kb = None
     if message_id:
         kb = _kb([InlineKeyboardButton(text="👀 Анкета", url=post_link(message_id))])
+    return "\n".join(lines), kb
+
+
+async def _announce_invite(bot, report_id: int, data: dict, username: str | None,
+                           first_name: str, message_id: int | None) -> None:
+    """Первая публикация анкеты в тему-ленту «Получили приглашение» (один раз, при появлении письма)."""
+    if not INVITES_TOPIC or not data.get("letter_date"):
+        return
+    text, kb = _invite_text_kb(data, username, first_name, message_id)
     try:
-        await bot.send_message(
-            chat_id=CHAT_ID, message_thread_id=INVITES_TOPIC,
-            text="\n".join(lines), reply_markup=kb,
+        posted = await bot.send_message(
+            chat_id=CHAT_ID, message_thread_id=INVITES_TOPIC, text=text, reply_markup=kb,
         )
-        db.mark_invite_announced(report_id)
+        db.mark_invite_announced(report_id, posted.message_id)
     except Exception:
         logging.getLogger("report_flow").exception(
             "не удалось опубликовать приглашение report=%s", report_id
+        )
+
+
+async def _update_invite(bot, invite_msg_id: int, data: dict, username: str | None,
+                         first_name: str, message_id: int | None) -> None:
+    """Обновляет уже опубликованную запись в ленте на месте (editMessageText, без нового поста)."""
+    if not INVITES_TOPIC or not invite_msg_id or not data.get("letter_date"):
+        return
+    text, kb = _invite_text_kb(data, username, first_name, message_id)
+    try:
+        await bot.edit_message_text(
+            chat_id=CHAT_ID, message_id=invite_msg_id, text=text, reply_markup=kb,
+        )
+    except TelegramBadRequest:
+        pass  # «message is not modified» или сообщение удалено — не критично
+    except Exception:
+        logging.getLogger("report_flow").exception(
+            "не удалось обновить запись в ленте msg=%s", invite_msg_id
         )
 
 
@@ -1536,8 +1556,19 @@ async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> N
         already_announced = old["invite_announced"] or 0
     except (KeyError, IndexError):
         already_announced = 0
-    if data.get("letter_date") and not already_announced:
-        await _announce_invite(
-            callback.bot, editing_id, data, user.username, user.first_name, final_message_id
-        )
+    try:
+        inv_msg = old["invite_msg_id"]
+    except (KeyError, IndexError):
+        inv_msg = None
+    if data.get("letter_date"):
+        if not already_announced:
+            # письмо появилось только сейчас — первая публикация в ленту
+            await _announce_invite(
+                callback.bot, editing_id, data, user.username, user.first_name, final_message_id
+            )
+        elif inv_msg:
+            # уже анонсировано и знаем id записи — обновляем её на месте (без нового поста)
+            await _update_invite(
+                callback.bot, inv_msg, data, user.username, user.first_name, final_message_id
+            )
     await _post_save_hooks(callback.bot, data["city"], data["visa_type"], data.get("letter_date"))
