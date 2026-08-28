@@ -555,8 +555,15 @@ async def ask_outcome(message: Message, state: FSMContext, edit: bool = False) -
         rows.append(keep_btn("outcome", OUTCOME_LABELS[data["outcome"]]))
     rows.append([InlineKeyboardButton(text="✅ Виза получена", callback_data="outcome:APPROVED")])
     rows.append([InlineKeyboardButton(text="❌ В визе отказано", callback_data="outcome:REFUSED")])
+    rows.append([InlineKeyboardButton(text="⏳ Пока нет результата / пропустить", callback_data="outcome:none")])
     rows.append([back_btn("passport")])
-    await _render(message, "Какой результат?", _kb(*rows), edit)
+    await _render(
+        message,
+        "Какой результат?\nЕсли решения по визе ещё нет — нажмите «Пропустить», "
+        "анкету можно дополнить позже.",
+        _kb(*rows),
+        edit,
+    )
 
 
 async def ask_visa_duration(message: Message, state: FSMContext, edit: bool = False) -> None:
@@ -1167,6 +1174,13 @@ async def input_passport_date(message: Message, state: FSMContext) -> None:
 @router.callback_query(Report.outcome, F.data.startswith("outcome:"))
 async def pick_outcome(callback: CallbackQuery, state: FSMContext) -> None:
     outcome = callback.data.split(":", 1)[1]
+    if outcome == "none":
+        # результата ещё нет — сохраняем анкету без исхода, дополнить можно позже
+        await state.update_data(outcome=None, visa_days=None, last_step="outcome")
+        await state.set_state(Report.confirm)
+        await show_summary(callback.message, state, edit=True)
+        await callback.answer()
+        return
     if outcome not in OUTCOME_LABELS:
         await callback.answer("Неизвестный вариант", show_alert=True)
         return
