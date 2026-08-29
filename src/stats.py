@@ -369,6 +369,13 @@ def build_text(s: Stats, visa_label: str, today: date | None = None) -> str:
         )
     else:
         lines.append("🔮 Для прогноза пока мало данных: нужны анкеты с письмами.")
+    km = km_forecast_wait(s.city, s.visa_type, today)
+    if km is not None:
+        eta_km = today + timedelta(days=km)
+        lines.append(
+            f"🔮 С учётом ещё ждущих (Каплан–Майер): письмо ≈ <b>{_fmt(eta_km)}</b> "
+            f"(~{km} дн.)"
+        )
 
     footer = f"<i>Срез {_fmt(today)} · за 7 дней +{s.recent_7d} анкет"
     if s.suspect_count:
