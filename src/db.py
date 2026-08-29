@@ -314,10 +314,10 @@ def reports_by_city_visa(city: str, visa_type: str, offset: int, limit: int) -> 
 
 
 def reports_for_survival() -> list[sqlite3.Row]:
-    """Данные для анализа выживаемости: (user_id, visa_type, queue_date, letter_date, suspect)."""
+    """Данные для анализа выживаемости: (user_id, city, visa_type, queue_date, letter_date, suspect)."""
     with _connect() as conn:
         return conn.execute(
-            "SELECT user_id, visa_type, queue_date, letter_date, COALESCE(suspect,0) AS suspect "
+            "SELECT user_id, city, visa_type, queue_date, letter_date, COALESCE(suspect,0) AS suspect "
             "FROM reports"
         ).fetchall()
 

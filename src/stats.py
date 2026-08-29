@@ -43,6 +43,7 @@ SPIKE_MIN_COUNT = 3         # минимум приглашений за дат�
 SPIKE_VELOCITY_FACTOR = 2   # во сколько раз выше средней скорости
 SUSPECT_MIN_DAYS = 7        # абсолютный пол правдоподобного ожидания письма
 SUSPECT_MEDIAN_FRACTION = 0.25  # подозрительно, если ожидание < 25% медианы
+WAIT_CHART_MIN_EVENTS = 6   # минимум писем, чтобы город попал на график ожидания (город×тип)
 
 BOT_TAG = "@Visa_Poland_Info_Bot"
 
@@ -497,6 +498,72 @@ def build_wave_forecast(cities: list[str], today: date | None = None) -> str | N
             lines.append(f"• {nd.strftime('%d.%m')} ({_WD_SHORT[nd.weekday()]}) — {', '.join(upcoming[nd])}")
     lines.append("<i>Ориентир по статистике участников, не гарантия.</i>")
     return "\n".join(lines)
+
+
+def _render_city_wait(visa_label: str, entries: list[tuple[str, int, int | None]],
+                      today: date) -> str | None:
+    """График по городам: полоса «по получившим (медиана)» — для каждого города,
+    и полоса «с учётом ожидающих (KM)» — только где данных достаточно (km не None)."""
+    if len(entries) < 2:
+        return None
+    entries = sorted(entries, key=lambda e: e[2] if e[2] is not None else e[1])
+    n = len(entries)
+    fig, ax = _fig(1.8 + 0.62 * n)
+    _style(ax, f"{visa_label} · Ожидание письма по городам")
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", color=GRID, linewidth=0.8)
+    import numpy as _np
+    y = _np.arange(n)
+    h = 0.38
+    ax.barh(y - h / 2, [nv for _, nv, _ in entries], height=h, color=BLUE,
+            zorder=2, label="по получившим (медиана)")
+    km_y = [i + h / 2 for i, (_, _, km) in enumerate(entries) if km is not None]
+    km_v = [km for _, _, km in entries if km is not None]
+    if km_v:
+        ax.barh(km_y, km_v, height=h, color="#cc2b3a",
+                zorder=2, label="с учётом ожидающих (KM)")
+    xmax = max(max(nv, km or 0) for _, nv, km in entries)
+    for i, (_, nv, km) in enumerate(entries):
+        ax.text(nv + xmax * 0.015, i - h / 2, f"{nv}", va="center", color=INK, fontsize=8.5)
+        if km is not None:
+            ax.text(km + xmax * 0.015, i + h / 2, f"{km}", va="center", color="#cc2b3a", fontsize=8.5)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels([c for c, _, _ in entries])
+    ax.invert_yaxis()
+    ax.set_xlim(0, xmax * 1.16)
+    ax.set_xlabel("Дней ожидания приглашения")
+    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    return _save(fig, f"срез {_fmt(today)} · KM (красная) — где данных достаточно")
+
+
+def render_wait_by_city_charts(
+    cities: list[str], visa_types: dict[str, str], today: date | None = None
+) -> list[str]:
+    """По одному графику на тип визы: города × (по получившим vs с учётом ожидающих, KM).
+
+    Город попадает на график, если у него есть медиана «по получившим» (как раньше);
+    KM-полоса добавляется только при >= WAIT_CHART_MIN_EVENTS писем и достигнутой
+    медиане. Разрез «в целом по стране» не строится."""
+    today = today or date.today()
+    rows = db.reports_for_survival()
+    left = db.left_user_ids()
+    paths: list[str] = []
+    for visa, label in visa_types.items():
+        entries: list[tuple[str, int, int | None]] = []
+        for city in cities:
+            s = collect_cached(city, visa)
+            if s.median_wait is None:
+                continue  # нет ни одного письма — как и раньше пропускаем город
+            rows_c = [r for r in rows if r["city"] == city]
+            times, events = _survival_pairs(rows_c, left, today, visa)
+            km = None
+            if sum(events) >= WAIT_CHART_MIN_EVENTS:
+                km = _km_median(_km_curve(times, events))
+            entries.append((city, s.median_wait, km))
+        path = _render_city_wait(label, entries, today)
+        if path:
+            paths.append(path)
+    return paths
 
 
 def build_daily_summary(

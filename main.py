@@ -133,18 +133,8 @@ async def membership_refresh_loop(bot: Bot) -> None:
 
 
 def _render_ranking_charts() -> list[str]:
-    """Рейтинг городов по медиане ожидания — по одному графику на категорию с данными."""
-    paths = []
-    for visa, label in VISA_TYPES.items():
-        entries = []
-        for city in CITIES:
-            s = stats.collect_cached(city, visa)
-            if s.median_wait is not None:
-                entries.append((city, s.median_wait))
-        chart = stats.render_city_ranking(label, entries)
-        if chart:
-            paths.append(chart)
-    return paths
+    """По типам виз: города × (по получившим vs с учётом ожидающих, KM)."""
+    return stats.render_wait_by_city_charts(CITIES, VISA_TYPES)
 
 
 async def _publish_summary(bot: Bot, text: str, chart_paths: list[str],
