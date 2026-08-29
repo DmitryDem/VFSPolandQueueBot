@@ -44,6 +44,7 @@ SPIKE_VELOCITY_FACTOR = 2   # во сколько раз выше средней
 SUSPECT_MIN_DAYS = 7        # абсолютный пол правдоподобного ожидания письма
 SUSPECT_MEDIAN_FRACTION = 0.25  # подозрительно, если ожидание < 25% медианы
 WAIT_CHART_MIN_EVENTS = 6   # минимум писем, чтобы город попал на график ожидания (город×тип)
+KM_FORECAST_MIN_EVENTS = 8  # минимум писем для KM-оценки в персональном прогнозе (город×тип)
 
 BOT_TAG = "@Visa_Poland_Info_Bot"
 
@@ -377,6 +378,18 @@ def build_text(s: Stats, visa_label: str, today: date | None = None) -> str:
     return "\n".join(lines)
 
 
+def km_forecast_wait(city: str, visa_type: str, today: date | None = None) -> int | None:
+    """KM-медиана ожидания письма для среза город×виза (с учётом ещё ждущих, вышедшие
+    из группы отброшены). None, если писем < KM_FORECAST_MIN_EVENTS или медиана не
+    достигнута (данных недостаточно)."""
+    today = today or date.today()
+    rows = [r for r in db.reports_for_survival() if r["city"] == city]
+    times, events = _survival_pairs(rows, db.left_user_ids(), today, visa_type)
+    if sum(events) < KM_FORECAST_MIN_EVENTS:
+        return None
+    return _km_median(_km_curve(times, events))
+
+
 def build_personal_forecast(
     s: Stats,
     visa_label: str,
@@ -417,6 +430,19 @@ def build_personal_forecast(
             )
     else:
         lines.append("Оценки срока пока нет — мало анкет с полученными письмами.")
+    km = km_forecast_wait(s.city, s.visa_type, today)
+    if km is not None:
+        eta_km = queue_date + timedelta(days=km)
+        if eta_km <= today:
+            lines.append(
+                f"С учётом ещё ждущих (метод Каплана–Майера): медиана {km} дн. уже "
+                "прошла — письмо может прийти со дня на день."
+            )
+        else:
+            lines.append(
+                f"С учётом ещё ждущих (Каплан–Майер): ориентировочно <b>{_fmt(eta_km)}</b> "
+                f"(~{(eta_km - today).days} дн., медиана {km} дн.) — обычно честнее наивной оценки"
+            )
     lines.append("")
     lines.append("<i>Оценка по анкетам участников, не официальные данные VFS.</i>")
     return "\n".join(lines)
