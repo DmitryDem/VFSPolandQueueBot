@@ -565,7 +565,9 @@ def _render_city_wait(visa_label: str, entries: list[tuple[str, int, int | None]
     ax.invert_yaxis()
     ax.set_xlim(0, xmax * 1.16)
     ax.set_xlabel("Дней ожидания приглашения")
-    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    # города отсортированы по возрастанию → длинные полосы внизу, вверху справа
+    # свободно; ставим легенду туда, чтобы не перекрывала полосы и подписи чисел
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.95)
     return _save(fig, f"срез {_fmt(today)} · KM (красная) — где данных достаточно")
 
 
