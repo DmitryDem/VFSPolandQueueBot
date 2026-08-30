@@ -16,6 +16,7 @@ router.message.filter(F.chat.type == "private")
 FAQ_PATH = Path(__file__).resolve().parent.parent / "config" / "faq.json"
 
 MENU = [
+    ("FAQ", "❓ Частые вопросы"),
     ("D_WORK", "📄 D (работа)"),
     ("D_DRIVER", "📄 D (водители)"),
     ("D_STUDENT", "📄 D (учёба)"),
@@ -28,7 +29,7 @@ MENU = [
     ("TERMS", "⏱ Сроки и порядок"),
 ]
 
-TITLE = "📋 <b>Документы, сборы и порядок подачи</b>\nВыберите раздел:"
+TITLE = "📋 <b>Документы, сборы, порядок и частые вопросы</b>\nВыберите раздел:"
 
 
 def _faq() -> dict:
@@ -87,11 +88,14 @@ async def docs_section(callback: CallbackQuery) -> None:
         await callback.answer("Раздел не найден", show_alert=True)
         return
     lines = [f"<b>{section['title']}</b>", ""]
-    if section.get("with_base"):
-        lines += [f"• {item}" for item in faq["base_items"]]
-        lines.append("")
-        lines.append("<b>Дополнительно под цель:</b>")
-    lines += [f"• {item}" for item in section["items"]]
+    if section.get("faq"):
+        lines.append("\n\n".join(f"❓ <b>{qa['q']}</b>\n{qa['a']}" for qa in section["faq"]))
+    else:
+        if section.get("with_base"):
+            lines += [f"• {item}" for item in faq["base_items"]]
+            lines.append("")
+            lines.append("<b>Дополнительно под цель:</b>")
+        lines += [f"• {item}" for item in section["items"]]
     await callback.message.edit_text(
         "\n".join(lines), reply_markup=_section_kb(faq, key),
         disable_web_page_preview=True,
