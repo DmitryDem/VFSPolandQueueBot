@@ -507,7 +507,6 @@ def build_wave_forecast(cities: list[str], today: date | None = None) -> str | N
         lines.append("📅 <b>Ближайшие ожидаемые раздачи:</b>")
         for nd in sorted(upcoming)[:WAVE_MAX_UPCOMING]:
             lines.append(f"• {nd.strftime('%d.%m')} ({_WD_SHORT[nd.weekday()]}) — {', '.join(upcoming[nd])}")
-    lines.append("<i>Ориентир по расписанию округов, не гарантия.</i>")
     return "\n".join(lines)
 
 
