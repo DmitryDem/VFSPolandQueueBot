@@ -510,16 +510,16 @@ def build_wave_forecast(cities: list[str], today: date | None = None) -> str | N
     return "\n".join(lines)
 
 
-def _render_city_wait(visa_label: str, entries: list[tuple[str, int, int | None]],
+def _render_city_wait(title: str, entries: list[tuple[str, int, int | None]],
                       today: date) -> str | None:
-    """График по городам: полоса «по получившим (медиана)» — для каждого города,
-    и полоса «с учётом ожидающих (KM)» — только где данных достаточно (km не None)."""
+    """Горизонтальные полосы: «по получившим (медиана)» для каждой строки + «с учётом
+    ожидающих (KM)» там, где данных достаточно (km не None). Строки — города или визы."""
     if len(entries) < 2:
         return None
     entries = sorted(entries, key=lambda e: e[2] if e[2] is not None else e[1])
     n = len(entries)
     fig, ax = _fig(1.8 + 0.62 * n)
-    _style(ax, f"{visa_label} · Ожидание письма по городам")
+    _style(ax, title)
     ax.grid(axis="y", visible=False)
     ax.grid(axis="x", color=GRID, linewidth=0.8)
     import numpy as _np
@@ -573,10 +573,31 @@ def wait_by_city_charts(
             if sum(events) >= WAIT_CHART_MIN_EVENTS:
                 km = _km_median(_km_curve(times, events))
             entries.append((city, s.median_wait, km))
-        path = _render_city_wait(label, entries, today)
+        path = _render_city_wait(f"{label} · Ожидание письма по городам", entries, today)
         if path:
             out.append((visa, path))
     return out
+
+
+def wait_by_visa_chart(
+    city: str, visa_types: dict[str, str], today: date | None = None
+) -> str | None:
+    """PNG для города: по типам виз, синяя «по получившим (медиана)» vs красная
+    «с учётом ожидающих (KM)». None, если у города <2 типов виз с данными."""
+    today = today or date.today()
+    rows_c = [r for r in db.reports_for_survival() if r["city"] == city]
+    left = db.left_user_ids()
+    entries: list[tuple[str, int, int | None]] = []
+    for visa, label in visa_types.items():
+        s = collect_cached(city, visa)
+        if s.median_wait is None:
+            continue
+        times, events = _survival_pairs(rows_c, left, today, visa)
+        km = None
+        if sum(events) >= WAIT_CHART_MIN_EVENTS:
+            km = _km_median(_km_curve(times, events))
+        entries.append((label, s.median_wait, km))
+    return _render_city_wait(f"{city} · Ожидание письма по типам виз", entries, today)
 
 
 def render_wait_by_city_charts(
