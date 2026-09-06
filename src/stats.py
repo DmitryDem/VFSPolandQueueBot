@@ -548,18 +548,19 @@ def _render_city_wait(visa_label: str, entries: list[tuple[str, int, int | None]
     return _save(fig, f"срез {_fmt(today)} · KM (красная) — где данных достаточно")
 
 
-def render_wait_by_city_charts(
+def wait_by_city_charts(
     cities: list[str], visa_types: dict[str, str], today: date | None = None
-) -> list[str]:
-    """По одному графику на тип визы: города × (по получившим vs с учётом ожидающих, KM).
+) -> list[tuple[str, str]]:
+    """[(visa_key, png_path)] — по одному графику на тип визы: города × (по получившим
+    vs с учётом ожидающих, KM).
 
-    Город попадает на график, если у него есть медиана «по получившим» (как раньше);
-    KM-полоса добавляется только при >= WAIT_CHART_MIN_EVENTS писем и достигнутой
-    медиане. Разрез «в целом по стране» не строится."""
+    Город попадает на график, если у него есть медиана «по получившим»; KM-полоса
+    добавляется только при >= WAIT_CHART_MIN_EVENTS писем и достигнутой медиане.
+    Разрез «в целом по стране» не строится."""
     today = today or date.today()
     rows = db.reports_for_survival()
     left = db.left_user_ids()
-    paths: list[str] = []
+    out: list[tuple[str, str]] = []
     for visa, label in visa_types.items():
         entries: list[tuple[str, int, int | None]] = []
         for city in cities:
@@ -574,8 +575,15 @@ def render_wait_by_city_charts(
             entries.append((city, s.median_wait, km))
         path = _render_city_wait(label, entries, today)
         if path:
-            paths.append(path)
-    return paths
+            out.append((visa, path))
+    return out
+
+
+def render_wait_by_city_charts(
+    cities: list[str], visa_types: dict[str, str], today: date | None = None
+) -> list[str]:
+    """Список путей PNG (для ежедневной рассылки в Telegram)."""
+    return [p for _, p in wait_by_city_charts(cities, visa_types, today)]
 
 
 def build_daily_summary(
