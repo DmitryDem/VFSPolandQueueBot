@@ -1387,6 +1387,7 @@ async def admin_decision(callback: CallbackQuery) -> None:
                 await callback.bot.delete_message(CHAT_ID, row["message_id"])
             except TelegramBadRequest:
                 pass
+        await _retire_invite(callback.bot, row)
         db.delete_report(row["id"])
         verdict = "🗑 анкета удалена (и из базы, и из темы)"
     else:
@@ -1443,6 +1444,27 @@ def _invite_text_kb(data: dict, username: str | None, first_name: str, message_i
     if message_id:
         kb = _kb([InlineKeyboardButton(text="👀 Анкета", url=post_link(message_id))])
     return "\n".join(lines), kb
+
+
+async def _retire_invite(bot, row) -> None:
+    """Анкета удалена — убираем её запись из ленты «Получили приглашение».
+
+    Удаляем сообщение (Telegram разрешает ботам только в первые 48 ч); если не вышло —
+    хотя бы снимаем клавиатуру, чтобы кнопка «Анкета» не вела на удалённый пост.
+    """
+    try:
+        inv = row["invite_msg_id"]
+    except (KeyError, IndexError):
+        inv = None
+    if not INVITES_TOPIC or not inv:
+        return
+    try:
+        await bot.delete_message(CHAT_ID, inv)
+    except TelegramBadRequest:
+        try:
+            await bot.edit_message_reply_markup(chat_id=CHAT_ID, message_id=inv, reply_markup=None)
+        except TelegramBadRequest:
+            pass
 
 
 async def _announce_invite(bot, report_id: int, data: dict, username: str | None,

@@ -605,7 +605,7 @@ async def del_confirm(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("delok:"))
 async def del_do(callback: CallbackQuery) -> None:
     from src import stats
-    from src.report_flow import CHAT_ID
+    from src.report_flow import CHAT_ID, _retire_invite
 
     rid = int(callback.data.split(":", 1)[1])
     row = db.get_report(rid)
@@ -617,6 +617,7 @@ async def del_do(callback: CallbackQuery) -> None:
             await callback.bot.delete_message(CHAT_ID, row["message_id"])
         except Exception:
             pass
+    await _retire_invite(callback.bot, row)  # запись в ленте приглашений не должна вести в никуда
     db.delete_report(rid)
     stats.note_write(row["city"], row["visa_type"])
     await callback.message.edit_text(
