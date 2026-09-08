@@ -50,6 +50,9 @@ def _menu_kb() -> InlineKeyboardMarkup:
 
 def _section_kb(faq: dict, key: str) -> InlineKeyboardMarkup:
     rows = []
+    # файлы раздела (бланки/образцы): по кнопке бот присылает PDF (file_id из faq.json)
+    for i, f in enumerate(faq["sections"].get(key, {}).get("files", [])):
+        rows.append([InlineKeyboardButton(text=f["title"], callback_data=f"docs:file:{key}:{i}")])
     if faq.get("anket_url"):
         rows.append([InlineKeyboardButton(
             text="📝 Заполнить анкету онлайн (e-Konsulat)", url=faq["anket_url"])])
@@ -76,6 +79,19 @@ async def docs_deeplink(message: Message, command: CommandObject, state: FSMCont
 @router.callback_query(F.data == "docs:menu")
 async def docs_menu(callback: CallbackQuery) -> None:
     await callback.message.edit_text(TITLE, reply_markup=_menu_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("docs:file:"))
+async def docs_file(callback: CallbackQuery) -> None:
+    """Прислать файл раздела (бланк/образец анкеты) отдельным сообщением."""
+    try:
+        _, _, key, idx = callback.data.split(":", 3)
+        f = _faq()["sections"][key]["files"][int(idx)]
+    except (ValueError, KeyError, IndexError):
+        await callback.answer("Файл не найден", show_alert=True)
+        return
+    await callback.message.answer_document(f["file_id"], caption=f.get("caption"))
     await callback.answer()
 
 
