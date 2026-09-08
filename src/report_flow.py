@@ -314,10 +314,17 @@ ERROR_NOTE = (
     "❌ <i>Ошибка: дата постановки раньше запуска очереди "
     f"({QUEUE_START.strftime('%d.%m.%Y')}). В статистике не учитывается.</i>"
 )
+JUMP_NOTE = (
+    "⚠️ <i>Отмечено как сомнительное: письмо пришло раньше, чем людям, вставшим в очередь "
+    "до этой анкеты (мимо очереди). В статистике и прогнозах не учитывается.</i>"
+)
 
 
 def suspect_note(d: dict) -> str:
-    """Текст пометки по причине: ранняя дата = точная ошибка, иначе — сомнительный срок."""
+    """Текст пометки по причине: ранняя дата = точная ошибка; 'jump' = мимо очереди;
+    иначе — аномально короткий срок."""
+    if d.get("suspect_reason") == "jump":
+        return JUMP_NOTE
     try:
         if datetime.strptime(d["queue_date"], "%Y-%m-%d").date() < QUEUE_START:
             return ERROR_NOTE
@@ -380,6 +387,7 @@ def build_post_text_from_row(row) -> tuple[str, str, str]:
         "outcome": row["outcome"],
         "visa_days": row["visa_days"],
         "label": row["label"],
+        "suspect_reason": row["suspect_reason"],
     }
     text = build_post_text(
         data, row["username"], "аноним", edited=False, suspect=bool(row["suspect"])

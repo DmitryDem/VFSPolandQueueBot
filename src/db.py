@@ -57,6 +57,8 @@ _MIGRATIONS = [
     "ALTER TABLE reports ADD COLUMN outcome TEXT",
     # 1 = сомнительная (аномальный срок ожидания, в статистике не учитывается)
     "ALTER TABLE reports ADD COLUMN suspect INTEGER DEFAULT 0",
+    # причина пометки «сомнительная»: NULL/'short' = аномально короткий срок, 'jump' = мимо очереди
+    "ALTER TABLE reports ADD COLUMN suspect_reason TEXT",
     # срок выданной визы в днях (NULL = не указан)
     "ALTER TABLE reports ADD COLUMN visa_days INTEGER",
     # уточнение категории для D (Other): KARTA | STUDY | NULL
@@ -176,11 +178,23 @@ def funnel_counts(days: int = 7) -> dict[str, int]:
         return {r[0]: r[1] for r in rows}
 
 
-def set_suspect(report_id: int, suspect: int) -> None:
+def set_suspect(report_id: int, suspect: int, reason: str | None = None) -> None:
+    """suspect=0 сбрасывает причину; suspect=1 без reason сохраняет уже записанную причину."""
     with _connect() as conn:
-        conn.execute(
-            "UPDATE reports SET suspect = ?, updated_at = ? WHERE id = ?",
-            (suspect, _now(), report_id),
+        if not suspect:
+            conn.execute(
+                "UPDATE reports SET suspect = 0, suspect_reason = NULL, updated_at = ? WHERE id = ?",
+                (_now(), report_id),
+            )
+        elif reason is not None:
+            conn.execute(
+                "UPDATE reports SET suspect = 1, suspect_reason = ?, updated_at = ? WHERE id = ?",
+                (reason, _now(), report_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE reports SET suspect = 1, updated_at = ? WHERE id = ?",
+                (_now(), report_id),
         )
 
 
