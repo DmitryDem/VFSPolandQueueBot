@@ -29,6 +29,11 @@ TOPICS = json.loads(
 CHAT_ID = TOPICS["chat_id"]
 GENERAL_TOPIC = TOPICS["service_topics"]["general"]
 GROUP_LINK = f"https://t.me/c/{str(CHAT_ID).removeprefix('-100')}/{GENERAL_TOPIC}"
+# тема «📖 Как пользоваться ботом» (закрытая, с инструкцией и deep-link кнопками)
+HOWTO_TOPIC = TOPICS["service_topics"].get("howto")
+HOWTO_LINK = (
+    f"https://t.me/c/{str(CHAT_ID).removeprefix('-100')}/{HOWTO_TOPIC}" if HOWTO_TOPIC else GROUP_LINK
+)
 
 router = Router()
 
@@ -86,6 +91,7 @@ async def on_captcha_click(callback: CallbackQuery) -> None:
             "• Очередь по порядку постановки (город + тип визы) — /queue; "
             "«люди рядом» с вами — /near; все анкеты города — /list.\n"
             "• Статистика и прогноз: /stats и /my.\n"
+            "• Полная инструкция — в теме «📖 Как пользоваться ботом» (кнопка ниже).\n"
             "• Сроки и статистика по городам — также на сайте vfsstats.by.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -95,10 +101,24 @@ async def on_captcha_click(callback: CallbackQuery) -> None:
                     [InlineKeyboardButton(
                         text="📝 Заполнить анкету", url=f"https://t.me/{me.username}?start=go"
                     )],
-                    [InlineKeyboardButton(
-                        text="🌐 Статистика на сайте", url="https://vfsstats.by/"
-                    )],
-                    [InlineKeyboardButton(text="➡️ Перейти в группу", url=GROUP_LINK)],
+                    [
+                        InlineKeyboardButton(
+                            text="📊 Статистика", url=f"https://t.me/{me.username}?start=menu_stats"
+                        ),
+                        InlineKeyboardButton(
+                            text="🔮 Мой прогноз", url=f"https://t.me/{me.username}?start=menu_my"
+                        ),
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="📋 Документы и FAQ", url=f"https://t.me/{me.username}?start=docs"
+                        ),
+                        InlineKeyboardButton(text="📖 Инструкция", url=HOWTO_LINK),
+                    ],
+                    [
+                        InlineKeyboardButton(text="🌐 Сайт vfsstats.by", url="https://vfsstats.by/"),
+                        InlineKeyboardButton(text="➡️ Перейти в группу", url=GROUP_LINK),
+                    ],
                 ]
             ),
         )

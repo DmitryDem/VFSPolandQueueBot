@@ -6,7 +6,8 @@
   "service_topics": {
     "general": 2,
     "stats": 204,
-    "invites": 4169
+    "invites": 4169,
+    "howto": 6912
   },
   "cities": {
     "Гомель": { "D_OTHER": 9, "D_DRIVER": 11, "D_WORK": 4, "D_STUDENT": 1421, "C_OTHER": 16 },
