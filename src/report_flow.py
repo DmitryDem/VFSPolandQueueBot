@@ -1052,7 +1052,7 @@ async def input_queue_num(message: Message, state: FSMContext) -> None:
 async def letter_none(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(
         letter_date=None, slots=None, submit_date=None, passport_date=None,
-        outcome=None, last_step="letter", suspect_wait=False,
+        outcome=None, last_step="letter", suspect_wait=False, suspect_reason=None,
     )
     db.log_event(callback.from_user.id, "letter")
     await state.set_state(Report.confirm)
@@ -1085,9 +1085,40 @@ async def input_letter_date(message: Message, state: FSMContext) -> None:
             ),
         )
         return
-    await state.update_data(letter_date=d.isoformat(), suspect_wait=False)
+    # «мимо очереди»: письмо пришло, а вставшие раньше (и ещё в чате) всё ждут
+    ahead = stats.jump_ahead(
+        data["city"], data["visa_type"], data["queue_date"], data.get("queue_time"),
+        exclude_id=data.get("editing_id"),
+    )
+    if ahead >= stats.JUMP_MIN_AHEAD:
+        await state.update_data(pending_letter=d.isoformat(), jump_ahead=ahead)
+        await message.answer(
+            f"⚠️ По вашим данным письмо пришло раньше, чем <b>{ahead}</b> участникам, которые "
+            "встали в очередь до вас и ещё ждут. Обычно так выходит из-за опечатки в дате "
+            "постановки в очередь.\n\nПроверьте дату постановки и дату письма.",
+            reply_markup=_kb(
+                [InlineKeyboardButton(text="✏️ Исправить даты", callback_data="swait:fix")],
+                [InlineKeyboardButton(text="✅ Да, всё верно", callback_data="sjump:ok")],
+            ),
+        )
+        return
+    await state.update_data(letter_date=d.isoformat(), suspect_wait=False, suspect_reason=None)
     db.log_event(message.from_user.id, "letter")
     await ask_slots(message, state)
+
+
+@router.callback_query(Report.letter_date, F.data == "sjump:ok")
+async def suspect_jump_confirm(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    if not data.get("pending_letter"):
+        await callback.answer("Сессия устарела, отправьте /report", show_alert=True)
+        return
+    await state.update_data(
+        letter_date=data["pending_letter"], pending_letter=None, suspect_wait=True, suspect_reason="jump",
+    )
+    db.log_event(callback.from_user.id, "letter")
+    await ask_slots(callback.message, state, edit=True)
+    await callback.answer()
 
 
 @router.callback_query(Report.letter_date, F.data == "swait:fix")
@@ -1103,7 +1134,9 @@ async def suspect_wait_confirm(callback: CallbackQuery, state: FSMContext) -> No
     if not data.get("pending_letter"):
         await callback.answer("Сессия устарела, отправьте /report", show_alert=True)
         return
-    await state.update_data(letter_date=data["pending_letter"], pending_letter=None, suspect_wait=True)
+    await state.update_data(
+        letter_date=data["pending_letter"], pending_letter=None, suspect_wait=True, suspect_reason="short",
+    )
     db.log_event(callback.from_user.id, "letter")
     await ask_slots(callback.message, state, edit=True)
     await callback.answer()
@@ -1285,6 +1318,7 @@ async def confirm_yes(callback: CallbackQuery, state: FSMContext) -> None:
         passport_date=data.get("passport_date"),
         outcome=data.get("outcome"),
         suspect=suspect,
+        suspect_reason=data.get("suspect_reason") if suspect else None,
         visa_days=data.get("visa_days"),
         label=data.get("label"),
     )
@@ -1354,12 +1388,16 @@ async def _notify_admin_suspect(bot, report_id: int, data: dict, user) -> None:
         datetime.strptime(data["letter_date"], "%Y-%m-%d")
         - datetime.strptime(data["queue_date"], "%Y-%m-%d")
     ).days
+    if data.get("suspect_reason") == "jump":
+        why = (f"письмо пришло раньше, чем <b>{data.get('jump_ahead', '?')}</b> вставшим ранее "
+               "и ещё ждущим — мимо очереди; пользователь подтвердил даты")
+    else:
+        why = "пользователь подтвердил аномально короткий срок ожидания"
     try:
         await bot.send_message(
             chat_id=admin,
             text=(
-                "⚠️ <b>Сомнительная анкета</b> (пользователь подтвердил аномальные даты; "
-                "в статистике не учитывается)\n\n"
+                f"⚠️ <b>Сомнительная анкета</b> ({why}; в статистике не учитывается)\n\n"
                 f"🏙 {data['city']} · {VISA_TYPES[data['visa_type']]}\n"
                 f"👤 {user_label(user.username, user.first_name)} (id {user.id})\n"
                 f"⏳ Очередь: {fmt(data['queue_date'])} → 📬 письмо: {fmt(data['letter_date'])} "
@@ -1515,11 +1553,11 @@ async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> N
     user = callback.from_user
     old = db.get_report(editing_id)
     if data.get("suspect_wait"):
-        suspect = 1
+        suspect, reason = 1, data.get("suspect_reason")
     elif data.get("letter_date") == old["letter_date"] and data["queue_date"] == old["queue_date"]:
-        suspect = old["suspect"] or 0  # даты не менялись — статус сохраняем
+        suspect, reason = old["suspect"] or 0, old["suspect_reason"]  # даты не менялись — статус сохраняем
     else:
-        suspect = 0
+        suspect, reason = 0, None
     db.update_report(
         report_id=editing_id,
         queue_date=data["queue_date"],
@@ -1531,6 +1569,7 @@ async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> N
         passport_date=data.get("passport_date"),
         outcome=data.get("outcome"),
         suspect=suspect,
+        suspect_reason=reason if suspect else None,
         username=user.username,
         visa_days=data.get("visa_days"),
         label=data.get("label"),

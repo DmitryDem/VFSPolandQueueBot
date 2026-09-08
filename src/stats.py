@@ -43,6 +43,7 @@ SPIKE_MIN_COUNT = 3         # минимум приглашений за дат�
 SPIKE_VELOCITY_FACTOR = 2   # во сколько раз выше средней скорости
 SUSPECT_MIN_DAYS = 7        # абсолютный пол правдоподобного ожидания письма
 SUSPECT_MEDIAN_FRACTION = 0.25  # подозрительно, если ожидание < 25% медианы
+JUMP_MIN_AHEAD = 5          # письмо при >= N ждущих, вставших раньше (и ещё в чате) — «мимо очереди»
 WAIT_CHART_MIN_EVENTS = 6   # минимум писем, чтобы город попал на график ожидания (город×тип)
 KM_FORECAST_MIN_EVENTS = 8  # минимум писем для KM-оценки в персональном прогнозе (город×тип)
 
@@ -639,6 +640,16 @@ def build_daily_summary(
     lines.append("")
     lines.append(f"Подробнее и графики — /stats в личке с ботом. {BOT_TAG}")
     return "\n".join(lines)
+
+
+def jump_ahead(city: str, visa_type: str, queue_iso: str, queue_time: str | None,
+               exclude_id: int | None = None) -> int:
+    """Сколько человек, вставших в очередь раньше этой позиции, ещё ждут письма и остаются
+    в группе. Большое число при полученном письме = анкета «выбилась вперёд мимо очереди»
+    (чаще всего — опечатка в дате постановки)."""
+    users = db.pending_ahead_users(city, visa_type, queue_iso, queue_time, exclude_id)
+    left = db.left_user_ids()
+    return sum(1 for u in users if u not in left)
 
 
 def wait_suspicion(city: str, visa_type: str, queue_iso: str, letter_iso: str) -> tuple[bool, int, int | None]:

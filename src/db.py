@@ -104,6 +104,7 @@ def save_report(
     passport_date: str | None = None,
     outcome: str | None = None,
     suspect: int = 0,
+    suspect_reason: str | None = None,
     visa_days: int | None = None,
     subcategory: str | None = None,
     label: str | None = None,
@@ -114,11 +115,11 @@ def save_report(
             """INSERT INTO reports
                (user_id, username, city, visa_type, queue_date, queue_time,
                 letter_date, slots, submit_date, passport_date, outcome, suspect,
-                visa_days, subcategory, label, queue_num, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                suspect_reason, visa_days, subcategory, label, queue_num, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (user_id, username, city, visa_type, queue_date, queue_time,
              letter_date, slots, submit_date, passport_date, outcome, suspect,
-             visa_days, subcategory, label, queue_num, _now()),
+             suspect_reason, visa_days, subcategory, label, queue_num, _now()),
         )
         return cur.lastrowid
 
@@ -133,6 +134,7 @@ def update_report(
     passport_date: str | None = None,
     outcome: str | None = None,
     suspect: int = 0,
+    suspect_reason: str | None = None,
     username: str | None = None,
     visa_days: int | None = None,
     subcategory: str | None = None,
@@ -144,10 +146,10 @@ def update_report(
         conn.execute(
             """UPDATE reports SET queue_date = ?, queue_time = ?, letter_date = ?,
                slots = ?, submit_date = ?, passport_date = ?, outcome = ?,
-               suspect = ?, username = ?, visa_days = ?, subcategory = ?,
+               suspect = ?, suspect_reason = ?, username = ?, visa_days = ?, subcategory = ?,
                label = ?, queue_num = ?, updated_at = ? WHERE id = ?""",
             (queue_date, queue_time, letter_date, slots, submit_date,
-             passport_date, outcome, suspect, username, visa_days, subcategory,
+             passport_date, outcome, suspect, suspect_reason, username, visa_days, subcategory,
              label, queue_num, _now(), report_id),
         )
 
@@ -366,6 +368,23 @@ def letters_for_waves() -> list[sqlite3.Row]:
             "SELECT city, letter_date FROM reports "
             "WHERE letter_date IS NOT NULL AND (suspect IS NULL OR suspect = 0)"
         ).fetchall()
+
+
+def pending_ahead_users(
+    city: str, visa_type: str, queue_date: str, queue_time: str | None, exclude_id: int | None = None
+) -> list[int]:
+    """user_id ждущих (без письма, не сомнительных) в том же городе×визе, вставших СТРОГО раньше
+    позиции (queue_date, queue_time). Одинаковая дата сравнивается по времени только когда
+    оно указано у обоих; без времени — не считается «раньше» (консервативно)."""
+    with _connect() as conn:
+        return [r[0] for r in conn.execute(
+            """SELECT user_id FROM reports
+               WHERE city = ? AND visa_type = ? AND letter_date IS NULL
+                 AND COALESCE(suspect, 0) = 0 AND id != COALESCE(?, -1)
+                 AND (queue_date < ?
+                      OR (queue_date = ? AND ? IS NOT NULL AND queue_time IS NOT NULL AND queue_time < ?))""",
+            (city, visa_type, exclude_id, queue_date, queue_date, queue_time, queue_time),
+        ).fetchall()]
 
 
 def reports_for(city: str, visa_type: str) -> list[sqlite3.Row]:
