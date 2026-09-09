@@ -123,6 +123,38 @@ async def cmd_wait(message: Message) -> None:
             os.unlink(p)
 
 
+# ---------- /terms: на какой срок выдают визы (по типам, вся страна) ----------
+
+async def _send_terms(message: Message) -> None:
+    text = stats.visa_terms_text(VISA_TYPES)
+    if not text:
+        await message.answer("Пока мало анкет с полученной визой, чтобы оценить сроки.")
+        return
+    path = stats.render_visa_terms_chart(VISA_TYPES)
+    if not path:
+        await message.answer(text)
+        return
+    try:
+        if len(text) <= 1024:  # лимит подписи к фото
+            await message.answer_photo(FSInputFile(path), caption=text)
+        else:
+            await message.answer(text)
+            await message.answer_photo(FSInputFile(path))
+    finally:
+        os.unlink(path)
+
+
+@router.message(Command("terms"))
+async def cmd_terms(message: Message) -> None:
+    await _send_terms(message)
+
+
+@router.message(CommandStart(deep_link=True, magic=F.args == "menu_terms"))
+async def terms_deeplink(message: Message, command: CommandObject, state: FSMContext) -> None:
+    await state.clear()
+    await _send_terms(message)
+
+
 # ---------- /stats ----------
 
 @router.message(Command("stats"))

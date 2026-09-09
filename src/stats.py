@@ -323,9 +323,6 @@ def build_text(s: Stats, visa_label: str, today: date | None = None) -> str:
         lines.append(horizon)
     if s.passport_median is not None:
         lines.append(f"🛂 Паспорт после подачи: ~<b>{s.passport_median} дн.</b>")
-    term = visa_term_line(s.visa_type)
-    if term:
-        lines.append(term)
     if s.approved or s.refused:
         lines.append(f"Результаты: ✅ <b>{s.approved}</b> · ❌ <b>{s.refused}</b>")
     if s.last_letter and s.front_queue_date:
@@ -656,16 +653,66 @@ def _term_bucket(days: int) -> str:
     return "дольше"
 
 
-def visa_term_line(visa_type: str) -> str | None:
-    """«На какой срок дают визу» по типу визы (все города): доли по корзинам срока.
-    None, если анкет со сроком < VISA_TERM_MIN."""
-    days = db.visa_days_for(visa_type)
-    if len(days) < VISA_TERM_MIN:
+_TERM_ORDER = [name for _, name in VISA_TERM_BUCKETS] + ["дольше"]
+
+
+def _visa_terms(visa_types: dict[str, str]) -> list[tuple[str, list[int]]]:
+    """[(подпись визы, сроки в днях)] по типам с >= VISA_TERM_MIN анкетами со сроком."""
+    out = []
+    for visa, label in visa_types.items():
+        days = db.visa_days_for(visa)
+        if len(days) >= VISA_TERM_MIN:
+            out.append((label, days))
+    return out
+
+
+def visa_terms_text(visa_types: dict[str, str]) -> str | None:
+    """«На какой срок дают визу» — по всем типам виз (вся страна), доли по корзинам срока."""
+    data = _visa_terms(visa_types)
+    if not data:
         return None
-    cnt = Counter(_term_bucket(d) for d in days)
-    order = [name for _, name in VISA_TERM_BUCKETS] + ["дольше"]
-    parts = [f"{b} — {round(100 * cnt[b] / len(days))}%" for b in order if cnt.get(b)]
-    return "📅 На какой срок дают (по стране): " + " · ".join(parts)
+    lines = ["📅 <b>На какой срок дают визу</b>", ""]
+    for label, days in data:
+        cnt = Counter(_term_bucket(d) for d in days)
+        parts = [f"{b} — {round(100 * cnt[b] / len(days))}%" for b in _TERM_ORDER if cnt.get(b)]
+        lines.append(f"<b>{label}</b>: " + " · ".join(parts))
+    lines.append("")
+    lines.append("<i>Шенген C: «под поездку» — однократная на даты поездки; год/2 года — мультивиза. "
+                 f"По анкетам участников с полученной визой ({sum(len(d) for _, d in data)}).</i>")
+    return "\n".join(lines)
+
+
+def render_visa_terms_chart(visa_types: dict[str, str]) -> str | None:
+    """Стековые полосы: доля выданных виз по корзинам срока, на тип визы."""
+    data = _visa_terms(visa_types)
+    if not data:
+        return None
+    import numpy as _np
+    colors = {"под поездку": "#c9dcf3", "1 месяц": "#9ec5f2", "3 месяца": "#6ea6e6",
+              "полгода": "#3f86d6", "1 год": "#1f5fae", "2 года": "#123f78", "дольше": "#0b2a52"}
+    fig, ax = _fig(1.9 + 0.7 * len(data))
+    _style(ax, "На какой срок выдают визу")
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", color=GRID, linewidth=0.8)
+    y = _np.arange(len(data))
+    left = _np.zeros(len(data))
+    for b in _TERM_ORDER:
+        vals = _np.array([100 * sum(1 for d in days if _term_bucket(d) == b) / len(days) for _, days in data])
+        if not vals.any():
+            continue
+        ax.barh(y, vals, left=left, color=colors[b], label=b, height=0.6, zorder=2)
+        for i, v in enumerate(vals):
+            if v >= 10:
+                ax.text(left[i] + v / 2, i, f"{v:.0f}%", va="center", ha="center", fontsize=8.5,
+                        color=INK if b in ("под поездку", "1 месяц") else "white")
+        left += vals
+    ax.set_yticks(list(y))
+    ax.set_yticklabels([label for label, _ in data])
+    ax.invert_yaxis()
+    ax.set_xlim(0, 100)
+    ax.set_xlabel("% выданных виз")
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.32), fontsize=8, ncol=4, framealpha=0.95)
+    return _save(fig, "по анкетам участников с полученной визой")
 
 
 def jump_ahead(city: str, visa_type: str, queue_iso: str, queue_time: str | None,
