@@ -370,6 +370,17 @@ def letters_for_waves() -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def visa_days_for(visa_type: str) -> list[int]:
+    """Сроки выданных виз (дни) по типу визы, все города; без сомнительных и отказов."""
+    with _connect() as conn:
+        return [r[0] for r in conn.execute(
+            """SELECT visa_days FROM reports
+               WHERE visa_type = ? AND visa_days IS NOT NULL
+                 AND COALESCE(suspect, 0) = 0 AND COALESCE(outcome, '') != 'REFUSED'""",
+            (visa_type,),
+        ).fetchall()]
+
+
 def pending_ahead_users(
     city: str, visa_type: str, queue_date: str, queue_time: str | None, exclude_id: int | None = None
 ) -> list[int]:

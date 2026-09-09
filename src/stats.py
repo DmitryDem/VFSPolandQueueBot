@@ -44,6 +44,10 @@ SPIKE_VELOCITY_FACTOR = 2   # во сколько раз выше средней
 SUSPECT_MIN_DAYS = 7        # абсолютный пол правдоподобного ожидания письма
 SUSPECT_MEDIAN_FRACTION = 0.25  # подозрительно, если ожидание < 25% медианы
 JUMP_MIN_AHEAD = 5          # письмо при >= N ждущих, вставших раньше (и ещё в чате) — «мимо очереди»
+VISA_TERM_MIN = 3           # минимум анкет со сроком визы, чтобы показывать «на какой срок дают»
+# корзины срока выданной визы: (верхняя граница в днях, подпись)
+VISA_TERM_BUCKETS = [(29, "под поездку"), (45, "1 месяц"), (135, "3 месяца"),
+                     (270, "полгода"), (450, "1 год"), (900, "2 года")]
 WAIT_CHART_MIN_EVENTS = 6   # минимум писем, чтобы город попал на график ожидания (город×тип)
 KM_FORECAST_MIN_EVENTS = 8  # минимум писем для KM-оценки в персональном прогнозе (город×тип)
 
@@ -319,6 +323,9 @@ def build_text(s: Stats, visa_label: str, today: date | None = None) -> str:
         lines.append(horizon)
     if s.passport_median is not None:
         lines.append(f"🛂 Паспорт после подачи: ~<b>{s.passport_median} дн.</b>")
+    term = visa_term_line(s.visa_type)
+    if term:
+        lines.append(term)
     if s.approved or s.refused:
         lines.append(f"Результаты: ✅ <b>{s.approved}</b> · ❌ <b>{s.refused}</b>")
     if s.last_letter and s.front_queue_date:
@@ -640,6 +647,25 @@ def build_daily_summary(
     lines.append("")
     lines.append(f"Подробнее и графики — /stats в личке с ботом. {BOT_TAG}")
     return "\n".join(lines)
+
+
+def _term_bucket(days: int) -> str:
+    for limit, name in VISA_TERM_BUCKETS:
+        if days <= limit:
+            return name
+    return "дольше"
+
+
+def visa_term_line(visa_type: str) -> str | None:
+    """«На какой срок дают визу» по типу визы (все города): доли по корзинам срока.
+    None, если анкет со сроком < VISA_TERM_MIN."""
+    days = db.visa_days_for(visa_type)
+    if len(days) < VISA_TERM_MIN:
+        return None
+    cnt = Counter(_term_bucket(d) for d in days)
+    order = [name for _, name in VISA_TERM_BUCKETS] + ["дольше"]
+    parts = [f"{b} — {round(100 * cnt[b] / len(days))}%" for b in order if cnt.get(b)]
+    return "📅 На какой срок дают (по стране): " + " · ".join(parts)
 
 
 def jump_ahead(city: str, visa_type: str, queue_iso: str, queue_time: str | None,
