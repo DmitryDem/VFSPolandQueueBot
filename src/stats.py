@@ -553,6 +553,73 @@ def _render_city_wait(title: str, entries: list[tuple[str, int, int | None]],
     return _save(fig, f"срез {_fmt(today)} · KM (красная) — где данных достаточно")
 
 
+QUEUE_LAUNCH = date(2026, 6, 8)  # старт верифицированного листа ожидания VFS
+
+
+def _render_city_wait_front(label: str, entries: list[tuple[str, int, int | None, date]],
+                            today: date) -> str | None:
+    """Две панели для ежедневной сводки (одна картинка): слева — ожидание письма по городам
+    (синяя «по получившим», красная KM), справа — докуда дошла очередь (дата постановки,
+    до которой розданы приглашения). Порядок городов одинаковый."""
+    if len(entries) < 2:
+        return None
+    import numpy as _np
+    import matplotlib.dates as mdates
+    entries = sorted(entries, key=lambda e: e[2] if e[2] is not None else e[1])
+    n = len(entries)
+    fig, (ax, bx) = plt.subplots(1, 2, figsize=(11.5, 2.4 + 0.62 * n), dpi=150,
+                                 gridspec_kw={"width_ratios": [1, 1.05]})
+    fig.patch.set_facecolor(SURFACE)
+    y = _np.arange(n)
+    # --- слева: дни ожидания ---
+    _style(ax, f"{label} · ожидание письма, дней")
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", color=GRID, linewidth=0.8)
+    h = 0.38
+    ax.barh(y - h / 2, [e[1] for e in entries], height=h, color=BLUE, zorder=2,
+            label="по получившим (медиана)")
+    km_y = [i + h / 2 for i, e in enumerate(entries) if e[2] is not None]
+    km_v = [e[2] for e in entries if e[2] is not None]
+    if km_v:
+        ax.barh(km_y, km_v, height=h, color="#cc2b3a", zorder=2, label="с учётом ожидающих (KM)")
+    xmax = max(max(e[1], e[2] or 0) for e in entries)
+    for i, e in enumerate(entries):
+        ax.text(e[1] + xmax * 0.015, i - h / 2, f"{e[1]}", va="center", fontsize=8.5, color=INK)
+        if e[2] is not None:
+            ax.text(e[2] + xmax * 0.015, i + h / 2, f"{e[2]}", va="center", fontsize=8.5, color="#cc2b3a")
+    ax.set_yticks(list(y))
+    ax.set_yticklabels([e[0] for e in entries])
+    ax.invert_yaxis()
+    ax.set_xlim(0, xmax * 1.16)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.07), ncol=2, fontsize=8, frameon=False)
+    # --- справа: докуда дошла очередь ---
+    _style(bx, "Докуда дошла очередь (дата постановки)")
+    bx.grid(axis="y", visible=False)
+    bx.grid(axis="x", color=GRID, linewidth=0.8)
+    x0, x1 = mdates.date2num(QUEUE_LAUNCH), mdates.date2num(today)
+    fronts = [mdates.date2num(e[3]) for e in entries]
+    bx.barh(y, [x1 - x0 + 1] * n, left=x0, color=NEUTRAL, height=0.55, zorder=1, label="ещё ждут")
+    bx.barh(y, [f - x0 for f in fronts], left=x0, color=BLUE, height=0.55, zorder=2,
+            label="приглашения дошли до вставших…")
+    for i, (e, f) in enumerate(zip(entries, fronts)):
+        bx.text(f + 0.8, i, e[3].strftime("%d.%m"), va="center", fontsize=8.5, color=INK)
+    bx.set_yticks(list(y))
+    bx.set_yticklabels([e[0] for e in entries])
+    bx.invert_yaxis()
+    bx.set_xlim(x0, x1 + 1)
+    bx.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
+    bx.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=0, interval=2))
+    bx.legend(loc="upper center", bbox_to_anchor=(0.5, -0.07), ncol=2, fontsize=8, frameon=False)
+    fig.text(0.02, 0.012, f"срез {_fmt(today)} · KM (красная) — где данных достаточно",
+             color=INK2, fontsize=8)
+    fig.text(0.985, 0.012, BOT_TAG, color=INK2, fontsize=8, ha="right")
+    fig.tight_layout(rect=(0, 0.11, 1, 1))  # место под легенды и подпись
+    tmp = NamedTemporaryFile(suffix=".png", delete=False)
+    fig.savefig(tmp.name, facecolor=SURFACE)
+    plt.close(fig)
+    return tmp.name
+
+
 def wait_by_city_charts(
     cities: list[str], visa_types: dict[str, str], today: date | None = None
 ) -> list[tuple[str, str]]:
@@ -567,7 +634,7 @@ def wait_by_city_charts(
     left = db.left_user_ids()
     out: list[tuple[str, str]] = []
     for visa, label in visa_types.items():
-        entries: list[tuple[str, int, int | None]] = []
+        entries: list[tuple[str, int, int | None, date]] = []
         for city in cities:
             s = collect_cached(city, visa)
             if s.median_wait is None:
@@ -577,8 +644,14 @@ def wait_by_city_charts(
             km = None
             if sum(events) >= WAIT_CHART_MIN_EVENTS:
                 km = _km_median(_km_curve(times, events))
-            entries.append((city, s.median_wait, km))
-        path = _render_city_wait(f"{label} · Ожидание письма по городам", entries, today)
+            # фронт: самая поздняя дата постановки среди получивших письмо (без сомнительных)
+            fronts = [_try_d(r["queue_date"]) for r in rows_c
+                      if r["visa_type"] == visa and r["letter_date"] and not r["suspect"]]
+            fronts = [f for f in fronts if f]
+            if not fronts:
+                continue
+            entries.append((city, s.median_wait, km, max(fronts)))
+        path = _render_city_wait_front(label, entries, today)
         if path:
             out.append((visa, path))
     return out
