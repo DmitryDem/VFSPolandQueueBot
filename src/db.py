@@ -370,6 +370,23 @@ def letters_for_waves() -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def pending_behind_front() -> list[sqlite3.Row]:
+    """Анкеты без письма (не сомнительные), вставшие СТРОГО раньше фронта своего города×визы.
+    Фронт = макс. дата постановки среди получивших письмо. Поле `front` — в строке."""
+    with _connect() as conn:
+        return conn.execute(
+            """SELECT r.id, r.user_id, r.username, r.city, r.visa_type, r.queue_date, r.queue_time,
+                      r.queue_num, r.message_id, r.invite_msg_id, r.created_at, r.updated_at, f.front
+               FROM reports r
+               JOIN (SELECT city, visa_type, MAX(queue_date) AS front FROM reports
+                     WHERE letter_date IS NOT NULL AND COALESCE(suspect, 0) = 0
+                     GROUP BY city, visa_type) f
+                 ON f.city = r.city AND f.visa_type = r.visa_type
+               WHERE r.letter_date IS NULL AND COALESCE(r.suspect, 0) = 0 AND r.queue_date < f.front
+               ORDER BY r.city, r.visa_type, r.queue_date"""
+        ).fetchall()
+
+
 def visa_days_for(visa_type: str) -> list[int]:
     """Сроки выданных виз (дни) по типу визы, все города; без сомнительных и отказов."""
     with _connect() as conn:

@@ -22,6 +22,7 @@ FILES = [
     "requirements.txt",
     ".env",
     "src/__init__.py",
+    "src/admin_flow.py",
     "src/browse_flow.py",
     "src/captcha.py",
     "src/db.py",

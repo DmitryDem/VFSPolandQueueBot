@@ -10,12 +10,13 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
-    BotCommand, BotCommandScopeAllPrivateChats, ErrorEvent, FSInputFile,
+    BotCommand, BotCommandScopeAllPrivateChats, BotCommandScopeChat, ErrorEvent, FSInputFile,
     InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto,
 )
 from dotenv import load_dotenv
 
 from src import stats
+from src.admin_flow import router as admin_router
 from src.browse_flow import router as browse_router
 from src.captcha import router as captcha_router
 from src.docs_flow import router as docs_router
@@ -186,27 +187,32 @@ async def main() -> None:
     dp = Dispatcher()
     dp.errors.register(on_error)
     dp.include_router(captcha_router)
+    dp.include_router(admin_router)
     dp.include_router(docs_router)
     dp.include_router(browse_router)
     dp.include_router(stats_router)
     dp.include_router(router)
     dp.include_router(topic_router)
-    await bot.set_my_commands(
-        [
-            BotCommand(command="report", description="Заполнить/дополнить анкету"),
-            BotCommand(command="mine", description="Моя анкета"),
-            BotCommand(command="near", description="Люди рядом в очереди"),
-            BotCommand(command="list", description="Анкеты по городу"),
-            BotCommand(command="queue", description="Очередь города по порядку постановки"),
-            BotCommand(command="stats", description="Статистика и прогноз очереди"),
-            BotCommand(command="wait", description="Сроки ожидания приглашения (графики)"),
-            BotCommand(command="terms", description="На какой срок выдают визы"),
-            BotCommand(command="my", description="Персональный прогноз по вашей дате"),
-            BotCommand(command="docs", description="Документы, сборы, порядок подачи"),
-            BotCommand(command="cancel", description="Отменить текущую анкету"),
-        ],
-        scope=BotCommandScopeAllPrivateChats(),
-    )
+    commands = [
+        BotCommand(command="report", description="Заполнить/дополнить анкету"),
+        BotCommand(command="mine", description="Моя анкета"),
+        BotCommand(command="near", description="Люди рядом в очереди"),
+        BotCommand(command="list", description="Анкеты по городу"),
+        BotCommand(command="queue", description="Очередь города по порядку постановки"),
+        BotCommand(command="stats", description="Статистика и прогноз очереди"),
+        BotCommand(command="wait", description="Сроки ожидания приглашения (графики)"),
+        BotCommand(command="terms", description="На какой срок выдают визы"),
+        BotCommand(command="my", description="Персональный прогноз по вашей дате"),
+        BotCommand(command="docs", description="Документы, сборы, порядок подачи"),
+        BotCommand(command="cancel", description="Отменить текущую анкету"),
+    ]
+    await bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
+    admin_id = os.environ.get("ADMIN_CHAT_ID")
+    if admin_id:  # админские команды видны только в личке администратора
+        await bot.set_my_commands(
+            commands + [BotCommand(command="stale", description="Админ: мёртвые анкеты позади фронта")],
+            scope=BotCommandScopeChat(chat_id=int(admin_id)),
+        )
     await bot.delete_webhook(drop_pending_updates=False)
     asyncio.create_task(daily_summary_loop(bot))
     asyncio.create_task(membership_refresh_loop(bot))
