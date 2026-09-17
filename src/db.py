@@ -269,6 +269,15 @@ def find_latest(user_id: int) -> sqlite3.Row | None:
         ).fetchone()
 
 
+def reports_by_username(username: str) -> list[sqlite3.Row]:
+    """Все анкеты по нику (без @, регистр не важен) — для админского /who."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT * FROM reports WHERE lower(username) = lower(?) ORDER BY created_at DESC",
+            (username.lstrip("@"),),
+        ).fetchall()
+
+
 def reports_by_user(user_id: int) -> list[sqlite3.Row]:
     """Все анкеты пользователя (для мульти-анкет), свежие сверху."""
     with _connect() as conn:

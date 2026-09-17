@@ -210,7 +210,10 @@ async def main() -> None:
     admin_id = os.environ.get("ADMIN_CHAT_ID")
     if admin_id:  # админские команды видны только в личке администратора
         await bot.set_my_commands(
-            commands + [BotCommand(command="stale", description="Админ: мёртвые анкеты позади фронта")],
+            commands + [
+                BotCommand(command="stale", description="Админ: мёртвые анкеты позади фронта"),
+                BotCommand(command="who", description="Админ: автор анкеты по номеру или нику"),
+            ],
             scope=BotCommandScopeChat(chat_id=int(admin_id)),
         )
     await bot.delete_webhook(drop_pending_updates=False)

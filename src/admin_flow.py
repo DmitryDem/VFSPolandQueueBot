@@ -11,11 +11,11 @@ from datetime import date, datetime
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from src import db, stats
-from src.report_flow import CHAT_ID, VISA_TYPES, _admin_id, _retire_invite, fmt, post_link, user_label
+from src.report_flow import CHAT_ID, VISA_TYPES, _admin_id, _retire_invite, fmt, post_link, row_author, user_label
 
 log = logging.getLogger("admin")
 router = Router()
@@ -130,3 +130,54 @@ async def stale_action(callback: CallbackQuery) -> None:
     log.info("admin /stale: удалена анкета %s (%s/%s), %s", rid, row["city"], row["visa_type"], how)
     await callback.message.edit_text(base + f"\n\n<b>Решение:</b> 🗑 удалена ({how})")
     await callback.answer("Удалено")
+
+
+# ---------- /who: кто автор анкеты (в т.ч. анонимной) ----------
+
+def _who_card(r) -> str:
+    """Карточка анкеты для админа: реальный ник и id всегда, плюс как она подписана публично."""
+    when = fmt(r["queue_date"]) + (f" в {r['queue_time']}" if r["queue_time"] else "")
+    letter = fmt(r["letter_date"]) if r["letter_date"] else "ещё нет"
+    flags = []
+    if r["anon"]:
+        flags.append("🙈 ник скрыт")
+    if r["suspect"]:
+        flags.append("⚠️ сомнительная")
+    created = r["created_at"][:10]
+    lines = [
+        f"<b>Анкета #{r['id']}</b> · {r['city']} · {VISA_TYPES.get(r['visa_type'], r['visa_type'])}",
+        f"👤 Автор: <b>{user_label(r['username'], 'без ника')}</b> · id <code>{r['user_id']}</code>",
+        f"🏷 Публичная подпись: {row_author(r)}" + (f" · {', '.join(flags)}" if flags else ""),
+        f"⏳ Постановка {when} · PLB {r['queue_num'] or '—'} · 📬 письмо: {letter}",
+        f"🗓 создана {created}" + (f", правка {r['updated_at'][:10]}" if r["updated_at"] else ""),
+    ]
+    if r["message_id"]:
+        lines.append(f'<a href="{post_link(r["message_id"])}">👀 пост анкеты</a>')
+    return "
+".join(lines)
+
+
+@router.message(Command("who"))
+async def cmd_who(message: Message, command: CommandObject) -> None:
+    """Админ: /who 1497 — автор анкеты по номеру; /who @nick — все анкеты пользователя."""
+    if not _is_admin(message.from_user.id):
+        return
+    arg = (command.args or "").strip()
+    if not arg:
+        await message.answer("Использование: <code>/who 1497</code> (номер анкеты) или <code>/who @nick</code>")
+        return
+    if arg.lstrip("#").isdigit():
+        row = db.get_report(int(arg.lstrip("#")))
+        if row is None:
+            await message.answer(f"Анкеты #{arg.lstrip('#')} нет (удалена?).")
+            return
+        rows = [row]
+    else:
+        rows = db.reports_by_username(arg)
+        if not rows:
+            await message.answer(f"Анкет с ником {arg} не нашёл. Ник хранится на момент последней правки анкеты.")
+            return
+    for r in rows[:10]:
+        await message.answer(_who_card(r), disable_web_page_preview=True)
+    if len(rows) > 10:
+        await message.answer(f"…и ещё {len(rows) - 10}.")
