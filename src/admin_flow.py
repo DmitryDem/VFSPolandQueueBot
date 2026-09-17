@@ -153,8 +153,7 @@ def _who_card(r) -> str:
     ]
     if r["message_id"]:
         lines.append(f'<a href="{post_link(r["message_id"])}">👀 пост анкеты</a>')
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 
 @router.message(Command("who"))
