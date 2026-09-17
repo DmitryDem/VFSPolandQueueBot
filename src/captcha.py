@@ -28,11 +28,13 @@ TOPICS = json.loads(
 )
 CHAT_ID = TOPICS["chat_id"]
 GENERAL_TOPIC = TOPICS["service_topics"]["general"]
-GROUP_LINK = f"https://t.me/c/{str(CHAT_ID).removeprefix('-100')}/{GENERAL_TOPIC}"
+# публичная ссылка на группу (не на тему): откроет список тем или чат — как настроено у пользователя
+GROUP_LINK = "https://t.me/vfspolandstats"
+GENERAL_LINK = f"https://t.me/c/{str(CHAT_ID).removeprefix('-100')}/{GENERAL_TOPIC}"
 # тема «📖 Как пользоваться ботом» (закрытая, с инструкцией и deep-link кнопками)
 HOWTO_TOPIC = TOPICS["service_topics"].get("howto")
 HOWTO_LINK = (
-    f"https://t.me/c/{str(CHAT_ID).removeprefix('-100')}/{HOWTO_TOPIC}" if HOWTO_TOPIC else GROUP_LINK
+    f"https://t.me/c/{str(CHAT_ID).removeprefix('-100')}/{HOWTO_TOPIC}" if HOWTO_TOPIC else GENERAL_LINK
 )
 
 router = Router()
