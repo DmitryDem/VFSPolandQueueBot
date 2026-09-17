@@ -338,6 +338,15 @@ def reports_for_survival() -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def reports_for_survival_times() -> list[sqlite3.Row]:
+    """Как reports_for_survival, но с queue_time — для фронта очереди с точностью до часов."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT user_id, city, visa_type, queue_date, queue_time, letter_date, "
+            "COALESCE(suspect,0) AS suspect FROM reports"
+        ).fetchall()
+
+
 def waiting_user_ids() -> list[int]:
     """user_id всех, у кого есть ожидающая (без письма) анкета — их членство важно для цензурирования."""
     with _connect() as conn:

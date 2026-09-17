@@ -402,12 +402,203 @@ def km_forecast_wait(city: str, visa_type: str, today: date | None = None) -> in
     return _km_median(_km_curve(times, events))
 
 
+FRONT_MIN_LETTERS = 8      # минимум писем (город×виза) для оценки скорости фронта
+FRONT_MIN_WEEKS = 3        # минимум недель с письмами в окне регрессии
+FRONT_REG_WEEKS = 8        # окно регрессии скорости, недель
+FRONT_MIN_SPEED_H = 0.25   # часов очереди в неделю; ниже — «фронт стоит»
+FRONT_MAX_DAYS = 180       # дальше этого прогноз не называем датой («более полугода»)
+
+
+@dataclass
+class FrontForecast:
+    """Прогноз по скорости движения фронта очереди (докуда дошли приглашения).
+
+    Фронт считается с точностью до времени постановки (в анкете есть часы), поэтому виден
+    и медленный ход внутри одного дня (Минск/Шенген C ползёт по часам 8 июня)."""
+    status: str                    # ok | passed | stalled | nodata
+    front: datetime | None = None  # докуда дошли приглашения (дата+время постановки)
+    speed: float = 0.0             # дней очереди за календарный день
+    eta: date | None = None
+    stalled_weeks: int = 0
+    user_time_known: bool = True   # у пользователя указано время постановки
+    letters: list = field(default_factory=list)   # [(момент постановки, дата письма)] — для графика
+    weekly: list = field(default_factory=list)    # [(середина недели письма, фронт недели)]
+    reg_from: date | None = None                  # с какой даты считалась скорость
+
+
+def _queue_dt(qd: date, qt: str | None, default_h: int = 0) -> datetime:
+    """Дата+время постановки; без времени — default_h часов (0 для писем: не завышать фронт)."""
+    if qt:
+        try:
+            return datetime.combine(qd, datetime.strptime(qt[:5], "%H:%M").time())
+        except ValueError:
+            pass
+    return datetime.combine(qd, datetime.min.time()) + timedelta(hours=default_h)
+
+
+def front_forecast(city: str, visa_type: str, queue_date: date, queue_time: str | None = None,
+                   today: date | None = None) -> FrontForecast:
+    """Фронт = макс. момент постановки (дата+время) среди получивших письмо (город×виза).
+    Скорость — наклон недельного фронта (макс. постановка среди писем недели) за последние
+    FRONT_REG_WEEKS. ETA для вставшего Q: today + (Q − фронт)/скорость. Сомнительные не учитываются."""
+    today = today or date.today()
+    now0 = datetime.combine(today, datetime.min.time())
+    got: list[tuple[datetime, date]] = []
+    for r in db.reports_for_survival_times():
+        if r["city"] != city or r["visa_type"] != visa_type or r["suspect"] or not r["letter_date"]:
+            continue
+        q, l = _try_d(r["queue_date"]), _try_d(r["letter_date"])
+        if q and l and l >= q:
+            got.append((_queue_dt(q, r["queue_time"]), l))
+    if len(got) < FRONT_MIN_LETTERS:
+        return FrontForecast("nodata")
+    front = max(q for q, _ in got)
+    weeks: dict[date, datetime] = {}
+    for q, l in got:
+        wk = l - timedelta(days=l.weekday())
+        weeks[wk] = max(weeks.get(wk, q), q)
+    pts = sorted((wk + timedelta(days=3), q) for wk, q in weeks.items())
+    cutoff = today - timedelta(weeks=FRONT_REG_WEEKS)
+    reg = [p for p in pts if p[0] >= cutoff]
+    if len(reg) < FRONT_MIN_WEEKS:
+        reg = pts[-FRONT_MIN_WEEKS:]
+    if len(reg) < FRONT_MIN_WEEKS:
+        return FrontForecast("nodata", front=front)
+    extra = dict(letters=got, weekly=pts, reg_from=reg[0][0])
+    xs = [(x - today).days for x, _ in reg]
+    ys = [(y - now0).total_seconds() / 86400 for _, y in reg]
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    var = sum((x - mx) ** 2 for x in xs)
+    speed = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / var if var else 0.0
+    speed = max(speed, 0.0)
+    last_adv = min(l for q, l in got if q == front)
+    stalled_weeks = max(0, (today - last_adv).days // 7)
+    user_dt = _queue_dt(queue_date, queue_time, default_h=12)  # без времени — середина дня
+    if user_dt <= front:
+        return FrontForecast("passed", front, speed, None, stalled_weeks, bool(queue_time), **extra)
+    if speed * 7 * 24 < FRONT_MIN_SPEED_H:
+        return FrontForecast("stalled", front, speed, None, stalled_weeks, bool(queue_time), **extra)
+    gap_days = (user_dt - front).total_seconds() / 86400
+    eta = today + timedelta(days=round(gap_days / speed))
+    return FrontForecast("ok", front, speed, eta, stalled_weeks, bool(queue_time), **extra)
+
+
+def _fmt_front(front: datetime, speed: float) -> str:
+    """Фронт с часами, если очередь идёт медленнее ~2 дн. в неделю (движение внутри дня)."""
+    if speed * 7 < 2 and front.time() != datetime.min.time():
+        return f"{front:%d.%m.%Y} {front:%H:%M}"
+    return f"{front:%d.%m.%Y}"
+
+
+def _fmt_speed(speed: float) -> str:
+    per_week_days = speed * 7
+    if per_week_days >= 1:
+        return f"~{per_week_days:.0f} дн. в неделю"
+    hours = per_week_days * 24
+    if hours >= 1:
+        return f"~{hours:.0f} ч. в неделю"
+    return f"~{hours * 60:.0f} мин. в неделю"
+
+
+def front_forecast_lines(ff: FrontForecast, today: date) -> list[str]:
+    """Строки для персонального прогноза по методу скорости фронта."""
+    if ff.status == "nodata" or ff.front is None:
+        return []
+    head = "По скорости движения очереди:"
+    fr = _fmt_front(ff.front, ff.speed)
+    hint = ("" if ff.user_time_known
+            else " (укажите в анкете время постановки — прогноз станет точнее)")
+    if ff.status == "passed":
+        return [f"{head} приглашения уже дошли до вставших <b>{fr}</b> — ваша очередь пройдена, "
+                f"письмо может прийти в ближайшую волну.{hint}"]
+    if ff.status == "stalled":
+        return [f"{head} фронт приглашений стоит на <b>{fr}</b> уже ~{ff.stalled_weeks} нед. — "
+                "прогноз этим методом пока невозможен."]
+    left = (ff.eta - today).days
+    base = (f"{head} приглашения дошли до вставших <b>{fr}</b>, очередь продвигается "
+            f"на {_fmt_speed(ff.speed)} → ")
+    if left > 365:
+        return [base + f"до вашей очереди при такой скорости <b>более года</b>.{hint}"]
+    if left > FRONT_MAX_DAYS:
+        return [base + f"до вашей очереди при такой скорости <b>более полугода</b>.{hint}"]
+    return [base + f"до вашей очереди ≈ <b>{_fmt(ff.eta)}</b> (~{left} дн.).{hint}"]
+
+
+def render_front_speed_chart(city: str, visa_label: str, ff: FrontForecast, queue_date: date,
+                             queue_time: str | None = None, today: date | None = None) -> str | None:
+    """График к персональному прогнозу: письма (когда пришло → когда встал), недельный фронт,
+    линия скорости и её продление до очереди пользователя (зелёная пунктирная линия — он сам)."""
+    if ff.status == "nodata" or not ff.letters or not ff.weekly or ff.front is None:
+        return None
+    import matplotlib.dates as mdates
+    today = today or date.today()
+    user_dt = _queue_dt(queue_date, queue_time, default_h=12)
+    fig, ax = _fig(6.0)
+    _style(ax, f"{city} — {visa_label} · Докуда дошли приглашения")
+    ax.grid(axis="x", color=GRID, linewidth=0.8)
+    # режим «внутри одного дня» (очередь ползёт по часам): ось Y — время, письма без времени не рисуем
+    ys_all = [q for q, _ in ff.letters] + [user_dt, ff.front]
+    intraday = (max(ys_all) - min(ys_all)).days < 2
+    letters = ff.letters
+    if intraday:
+        letters = [(q, l) for q, l in ff.letters if q.time() != datetime.min.time()] or ff.letters
+    ax.scatter([l for _, l in letters], [q for q, _ in letters], s=16, color=BLUE, alpha=0.55,
+               zorder=3, label="письма участников: когда пришло → когда встал в очередь")
+    ax.plot([x for x, _ in ff.weekly], [y for _, y in ff.weekly], color=INK, linewidth=1.6, zorder=4,
+            label="фронт по неделям (докуда дошли приглашения)")
+    red = "#d71437"
+    x0 = ff.reg_from or ff.weekly[0][0]
+    if ff.status == "ok" and ff.eta:
+        x1 = min(ff.eta, today + timedelta(days=FRONT_MAX_DAYS))
+    else:
+        x1 = today + timedelta(days=45)
+
+    def at(x: date) -> datetime:
+        return ff.front + timedelta(days=ff.speed * (x - today).days)
+
+    ax.plot([x0, today], [at(x0), ff.front], color=red, linewidth=2, zorder=5,
+            label=f"скорость очереди: {_fmt_speed(ff.speed)}")
+    ax.plot([today, x1], [ff.front, at(x1)], color=red, linewidth=2, linestyle="--", zorder=5,
+            label="продление при той же скорости")
+    ax.axhline(user_dt, color=GREEN, linewidth=1.5, linestyle="--", zorder=6,
+               label=f"ваша постановка: {_fmt_front(user_dt, ff.speed)}")
+    ax.axvline(today, color=INK2, linewidth=0.9, linestyle=":", zorder=2)
+    ax.text(today, user_dt, " сегодня", color=INK2, fontsize=8, va="bottom", ha="left")
+    if ff.status == "ok" and ff.eta and ff.eta <= today + timedelta(days=FRONT_MAX_DAYS):
+        ax.scatter([ff.eta], [user_dt], s=70, color=GREEN, zorder=7, edgecolor=SURFACE, linewidth=1.2)
+        ax.annotate(f"≈ {ff.eta:%d.%m}", (ff.eta, user_dt), xytext=(6, 8), textcoords="offset points",
+                    color=GREEN, fontsize=9, fontweight="bold")
+    elif ff.status == "passed":
+        ax.text(today, user_dt, "ваша очередь уже пройдена ", color=GREEN, fontsize=9,
+                fontweight="bold", va="top", ha="right")
+    elif ff.status == "stalled":
+        ax.text(today, ff.front, f" фронт стоит ~{ff.stalled_weeks} нед.", color=red, fontsize=9, va="top")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=8))
+    ax.yaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=7))
+    if intraday:
+        ax.yaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+        ax.set_ylabel(f"время постановки в очередь {ff.front:%d.%m.%Y}", color=INK2, fontsize=9)
+        lo = min([q for q, _ in letters] + [user_dt, ff.front]); hi = max([q for q, _ in letters] + [user_dt, ff.front])
+        pad = max((hi - lo) * 0.12, timedelta(minutes=20))
+        ax.set_ylim(lo - pad, hi + pad)
+    else:
+        ax.yaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
+        ax.set_ylabel("дата постановки в очередь", color=INK2, fontsize=9)
+    ax.set_xlabel("календарная дата (когда пришло письмо)", color=INK2, fontsize=9)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncol=2, frameon=False, fontsize=8,
+              labelcolor=INK2)
+    ax.margins(x=0.03, y=0.08)
+    return _save(fig, f"скорость — по последним {FRONT_REG_WEEKS} нед. · сомнительные анкеты исключены · срез {_fmt(today)}")
+
+
 def build_personal_forecast(
     s: Stats,
     visa_label: str,
     queue_date: date,
     queue_time: str | None = None,
     today: date | None = None,
+    ff: FrontForecast | None = None,
 ) -> str:
     today = today or date.today()
     ahead = db.count_ahead(s.city, s.visa_type, queue_date.isoformat())
@@ -431,10 +622,7 @@ def build_personal_forecast(
     if s.median_wait is not None:
         eta = queue_date + timedelta(days=s.median_wait)
         if eta <= today:
-            lines.append(
-                f"Медианное ожидание ({s.median_wait} дн.) уже прошло — "
-                "письмо может прийти со дня на день. Проверяйте почту!"
-            )
+            lines.append(f"Медианное ожидание по получившим ({s.median_wait} дн.) уже прошло.")
         else:
             lines.append(
                 f"Письмо ориентировочно: <b>{_fmt(eta)}</b> "
@@ -446,15 +634,15 @@ def build_personal_forecast(
     if km is not None:
         eta_km = queue_date + timedelta(days=km)
         if eta_km <= today:
-            lines.append(
-                f"С учётом ещё ждущих (метод Каплана–Майера): медиана {km} дн. уже "
-                "прошла — письмо может прийти со дня на день."
-            )
+            lines.append(f"С учётом ещё ждущих (Каплан–Майер): медиана {km} дн. уже прошла.")
         else:
             lines.append(
                 f"С учётом ещё ждущих (Каплан–Майер): ориентировочно <b>{_fmt(eta_km)}</b> "
                 f"(~{(eta_km - today).days} дн., медиана {km} дн.) — обычно честнее наивной оценки"
             )
+    if ff is None:
+        ff = front_forecast(s.city, s.visa_type, queue_date, queue_time, today)
+    lines.extend(front_forecast_lines(ff, today))
     lines.append("")
     lines.append("<i>Оценка по анкетам участников, не официальные данные VFS.</i>")
     return "\n".join(lines)

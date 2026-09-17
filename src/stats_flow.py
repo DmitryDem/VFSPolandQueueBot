@@ -45,6 +45,27 @@ async def _send_charts(message: Message, s, label: str) -> None:
             os.unlink(p)
 
 
+async def _send_personal(message: Message, city: str, visa: str, qd, qt: str | None = None,
+                         prefix: str = "", reply_markup: InlineKeyboardMarkup | None = None) -> None:
+    """Персональный прогноз + график скорости фронта (подписью к фото, если влезает)."""
+    s = stats.collect_cached(city, visa)
+    label = VISA_TYPES[visa]
+    ff = stats.front_forecast(city, visa, qd, qt)
+    text = prefix + stats.build_personal_forecast(s, label, qd, queue_time=qt, ff=ff)
+    path = stats.render_front_speed_chart(city, label, ff, qd, qt)
+    if not path:
+        await message.answer(text, reply_markup=reply_markup)
+        return
+    try:
+        if len(text) <= 1024:  # лимит подписи к фото
+            await message.answer_photo(FSInputFile(path), caption=text, reply_markup=reply_markup)
+        else:
+            await message.answer(text)
+            await message.answer_photo(FSInputFile(path), reply_markup=reply_markup)
+    finally:
+        os.unlink(path)
+
+
 async def _send_stats(message: Message, city: str, visa: str) -> None:
     label = VISA_TYPES[visa]
     s = stats.collect_cached(city, visa)
@@ -315,12 +336,9 @@ async def _forecast_from_report(message: Message, row) -> None:
             reply_markup=_manual_kb(),
         )
         return
-    s = stats.collect_cached(city, visa)
-    text = (
-        f"📌 Данные взяты из вашей анкеты: в очереди с <b>{when}</b>\n\n"
-        + stats.build_personal_forecast(s, VISA_TYPES[visa], qd, queue_time=qt)
-    )
-    await message.answer(text, reply_markup=_manual_kb())
+    await _send_personal(message, city, visa, qd, qt,
+                         prefix=f"📌 Данные взяты из вашей анкеты: в очереди с <b>{when}</b>\n\n",
+                         reply_markup=_manual_kb())
 
 
 @router.message(Command("my"))
@@ -389,6 +407,5 @@ async def my_input_date(message: Message, state: FSMContext) -> None:
         return
     data = await state.get_data()
     city, visa = data["my_city"], data["my_visa"]
-    s = stats.collect_cached(city, visa)
-    await message.answer(stats.build_personal_forecast(s, VISA_TYPES[visa], d))
+    await _send_personal(message, city, visa, d)
     await state.clear()
