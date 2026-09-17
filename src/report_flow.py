@@ -237,12 +237,20 @@ def visa_kb(city: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def confirm_kb() -> InlineKeyboardMarkup:
+def anon_btn(anon: bool) -> InlineKeyboardButton:
+    return InlineKeyboardButton(
+        text="🙂 Показывать мой ник" if anon else "🙈 Скрыть мой ник (Аноним №…)",
+        callback_data="confirm:anon",
+    )
+
+
+def confirm_kb(anon: bool = False) -> InlineKeyboardMarkup:
     return _kb(
         [
             InlineKeyboardButton(text="✅ Всё верно", callback_data="confirm:yes"),
             InlineKeyboardButton(text="🔄 Заполнить заново", callback_data="confirm:restart"),
         ],
+        [anon_btn(anon)],
         [back_btn("last")],
     )
 
@@ -302,8 +310,21 @@ def reports_menu_kb(rows: list, can_add: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-def user_label(username: str | None, first_name: str) -> str:
+def user_label(username: str | None, first_name: str, anon: bool = False,
+               report_id: int | None = None) -> str:
+    """Подпись автора. anon=True — ник скрыт: «Аноним №<id анкеты>» (узнаваемо, но без ника)."""
+    if anon:
+        return f"Аноним №{report_id}" if report_id else "Аноним"
     return f"@{username}" if username else first_name
+
+
+def row_author(row) -> str:
+    """Подпись автора по строке БД (учитывает флаг «скрыть ник»)."""
+    try:
+        anon = bool(row["anon"])
+    except (KeyError, IndexError):
+        anon = False
+    return user_label(row["username"], "без ника", anon, row["id"])
 
 
 SUSPECT_NOTE = (
@@ -337,7 +358,7 @@ def build_post_text(
     d: dict, username: str | None, first_name: str, edited: bool, suspect: bool = False
 ) -> str:
     """Текст публикации в теме города."""
-    author = user_label(username, first_name)
+    author = user_label(username, first_name, bool(d.get("anon")), d.get("report_id"))
     if d.get("label"):
         author += f" · 👥 {d['label']}"
     lines = [f"👤 {author}"]
@@ -372,9 +393,36 @@ def build_post_text(
     return "\n".join(lines)
 
 
+def row_to_data(row) -> dict:
+    """Строка БД -> dict анкеты (как в FSM), для перерисовки поста/ленты."""
+    try:
+        anon = bool(row["anon"])
+    except (KeyError, IndexError):
+        anon = False
+    return {
+        "report_id": row["id"],
+        "anon": anon,
+        "city": row["city"],
+        "visa_type": row["visa_type"],
+        "queue_date": row["queue_date"],
+        "queue_time": row["queue_time"],
+        "queue_num": row["queue_num"],
+        "letter_date": row["letter_date"],
+        "slots": json.loads(row["slots"]) if row["slots"] else None,
+        "submit_date": row["submit_date"],
+        "passport_date": row["passport_date"],
+        "outcome": row["outcome"],
+        "visa_days": row["visa_days"],
+        "label": row["label"],
+        "suspect_reason": row["suspect_reason"],
+    }
+
+
 def build_post_text_from_row(row) -> tuple[str, str, str]:
     """(текст публикации, city, visa_type) из строки БД — для перерисовки модерацией."""
     data = {
+        "report_id": row["id"],
+        "anon": bool(row["anon"]) if "anon" in row.keys() else False,
         "city": row["city"],
         "visa_type": row["visa_type"],
         "queue_date": row["queue_date"],
@@ -390,7 +438,7 @@ def build_post_text_from_row(row) -> tuple[str, str, str]:
         "suspect_reason": row["suspect_reason"],
     }
     text = build_post_text(
-        data, row["username"], "аноним", edited=False, suspect=bool(row["suspect"])
+        data, row["username"], "без ника", edited=False, suspect=bool(row["suspect"])
     )
     return text, row["city"], row["visa_type"]
 
@@ -830,6 +878,7 @@ async def edit_start(callback: CallbackQuery, state: FSMContext) -> None:
         outcome=row["outcome"],
         visa_days=row["visa_days"],
         label=row["label"],
+        anon=bool(row["anon"]),
     )
     head = "Дополним анкету"
     if row["label"]:
@@ -1277,9 +1326,19 @@ async def show_summary(message: Message, state: FSMContext, edit: bool = False) 
         f"📄 Подача документов: <b>{fmt(data.get('submit_date'))}</b>\n"
         f"🛂 Паспорт получен: <b>{fmt(data.get('passport_date'))}</b>\n"
         f"Результат: <b>{OUTCOME_LABELS.get(data.get('outcome'), '—')}</b>\n"
-        f"🎫 Срок визы: <b>{fmt_duration(data.get('visa_days'))}</b>"
+        f"🎫 Срок визы: <b>{fmt_duration(data.get('visa_days'))}</b>\n"
+        f"👤 Подпись в теме: <b>{'Аноним №… (ник скрыт)' if data.get('anon') else 'ваш ник'}</b>"
     )
-    await _render(message, text, confirm_kb(), edit)
+    await _render(message, text, confirm_kb(bool(data.get("anon"))), edit)
+
+
+@router.callback_query(Report.confirm, F.data == "confirm:anon")
+async def confirm_toggle_anon(callback: CallbackQuery, state: FSMContext) -> None:
+    """Переключить «скрыть ник» прямо на экране подтверждения."""
+    data = await state.get_data()
+    await state.update_data(anon=not data.get("anon"))
+    await show_summary(callback.message, state, edit=True)
+    await callback.answer("Ник будет скрыт" if not data.get("anon") else "Ник будет показан")
 
 
 @router.callback_query(Report.confirm, F.data == "confirm:restart")
@@ -1321,7 +1380,9 @@ async def confirm_yes(callback: CallbackQuery, state: FSMContext) -> None:
         suspect_reason=data.get("suspect_reason") if suspect else None,
         visa_days=data.get("visa_days"),
         label=data.get("label"),
+        anon=1 if data.get("anon") else 0,
     )
+    data["report_id"] = report_id  # для подписи «Аноним №<id>»
     db.log_event(user.id, "saved_new")
     if suspect:
         await _notify_admin_suspect(callback.bot, report_id, data, user)
@@ -1485,7 +1546,7 @@ def _invite_text_kb(data: dict, username: str | None, first_name: str, message_i
     ]
     if data.get("queue_num"):
         lines.append(f"🔢 Номер очереди: PLB {data['queue_num']}…")
-    lines.append(f"👤 {user_label(username, first_name or 'аноним')}")
+    lines.append(f"👤 {user_label(username, first_name or 'без ника', bool(data.get('anon')), data.get('report_id'))}")
     kb = None
     if message_id:
         kb = _kb([InlineKeyboardButton(text="👀 Анкета", url=post_link(message_id))])
@@ -1573,7 +1634,9 @@ async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> N
         username=user.username,
         visa_days=data.get("visa_days"),
         label=data.get("label"),
+        anon=1 if data.get("anon") else 0,
     )
+    data["report_id"] = editing_id
     if suspect and not (old["suspect"] or 0):
         await _notify_admin_suspect(callback.bot, editing_id, data, user)
     new_text = build_post_text(

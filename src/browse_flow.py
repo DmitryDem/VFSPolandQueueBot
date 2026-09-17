@@ -15,6 +15,7 @@ from src.report_flow import (
     fmt_duration,
     fmt_slots,
     post_link,
+    row_author,
     user_label,
 )
 
@@ -62,7 +63,7 @@ def _fmt_row(row) -> str:
         status = f"✉️ {fmt(row['letter_date'])}"
     else:
         status = "⏳ ждёт"
-    return f"{when} → {status} · {user_label(row['username'], 'аноним')}"
+    return f"{when} → {status} · {row_author(row)}"
 
 
 async def _render_list(message: Message, city: str, visa: str, offset: int, edit: bool) -> None:
@@ -170,7 +171,7 @@ def _fmt_queue_row(row, pos: int) -> str:
         when += f" {row['queue_time']}"
     if row["message_id"]:
         when = f'<a href="{post_link(row["message_id"])}">{when}</a>'
-    return f"{pos}. {suspect}{when} · {_queue_status(row)} · {user_label(row['username'], 'аноним')}"
+    return f"{pos}. {suspect}{when} · {_queue_status(row)} · {row_author(row)}"
 
 
 def _queue_city_kb() -> InlineKeyboardMarkup:
@@ -541,10 +542,16 @@ async def _report_detail(message: Message, row, edit: bool = False) -> None:
         f"🛂 Паспорт: <b>{fmt(row['passport_date'])}</b>",
         f"Результат: <b>{OUTCOME_LABELS.get(row['outcome'], '—')}</b>",
         f"🎫 Срок визы: <b>{fmt_duration(row['visa_days'])}</b>",
+        f"👤 Подпись в теме: <b>{row_author(row)}</b>",
     ]
     rid = row["id"]
+    anon = bool(row["anon"])
     buttons = [
         [InlineKeyboardButton(text="✏️ Дополнить / исправить", callback_data=f"pick:{rid}")],
+        [InlineKeyboardButton(
+            text="🙂 Показывать мой ник" if anon else "🙈 Скрыть мой ник (Аноним №…)",
+            callback_data=f"anon:{rid}:{0 if anon else 1}",
+        )],
         [InlineKeyboardButton(text="🗑 Удалить анкету", callback_data=f"del:{rid}")],
         [InlineKeyboardButton(text="👥 Люди рядом", callback_data=f"nearr:{rid}"),
          InlineKeyboardButton(text=f"📄 Анкеты: {row['city']}",
@@ -566,6 +573,37 @@ async def mine_view(callback: CallbackQuery) -> None:
         return
     await _report_detail(callback.message, row, edit=True)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("anon:"))
+async def mine_toggle_anon(callback: CallbackQuery) -> None:
+    """Скрыть/показать ник: флаг в БД + перерисовка поста в теме и записи в ленте приглашений."""
+    from aiogram.exceptions import TelegramBadRequest
+    from src.report_flow import CHAT_ID, _update_invite, build_post_text_from_row, post_kb, row_to_data
+
+    _, rid, flag = callback.data.split(":")
+    rid = int(rid)
+    row = db.get_report(rid)
+    if row is None or row["user_id"] != callback.from_user.id:
+        await callback.answer("Анкета не найдена", show_alert=True)
+        return
+    db.set_anon(rid, flag == "1")
+    row = db.get_report(rid)
+    if row["message_id"]:
+        text, city, visa = build_post_text_from_row(row)
+        me = await callback.bot.me()
+        try:
+            await callback.bot.edit_message_text(
+                chat_id=CHAT_ID, message_id=row["message_id"], text=text,
+                reply_markup=post_kb(me.username, city, visa),
+            )
+        except TelegramBadRequest:
+            pass
+    if row["invite_msg_id"]:
+        await _update_invite(callback.bot, row["invite_msg_id"], row_to_data(row),
+                             row["username"], "без ника", row["message_id"])
+    await _report_detail(callback.message, row, edit=True)
+    await callback.answer("Ник скрыт" if flag == "1" else "Ник снова показывается")
 
 
 @router.callback_query(F.data == "mine:edit")

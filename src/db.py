@@ -71,6 +71,8 @@ _MIGRATIONS = [
     "ALTER TABLE reports ADD COLUMN invite_announced INTEGER DEFAULT 0",
     # message_id записи в теме-ленте «Получили приглашение» — чтобы обновлять её на месте при правках
     "ALTER TABLE reports ADD COLUMN invite_msg_id INTEGER",
+    # 1 = автор скрыл ник: в публичных постах/списках подпись «Аноним №<id>» (старые анкеты — 0)
+    "ALTER TABLE reports ADD COLUMN anon INTEGER DEFAULT 0",
 ]
 
 
@@ -109,17 +111,18 @@ def save_report(
     subcategory: str | None = None,
     label: str | None = None,
     queue_num: str | None = None,
+    anon: int = 0,
 ) -> int:
     with _connect() as conn:
         cur = conn.execute(
             """INSERT INTO reports
                (user_id, username, city, visa_type, queue_date, queue_time,
                 letter_date, slots, submit_date, passport_date, outcome, suspect,
-                suspect_reason, visa_days, subcategory, label, queue_num, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                suspect_reason, visa_days, subcategory, label, queue_num, anon, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (user_id, username, city, visa_type, queue_date, queue_time,
              letter_date, slots, submit_date, passport_date, outcome, suspect,
-             suspect_reason, visa_days, subcategory, label, queue_num, _now()),
+             suspect_reason, visa_days, subcategory, label, queue_num, anon, _now()),
         )
         return cur.lastrowid
 
@@ -140,18 +143,27 @@ def update_report(
     subcategory: str | None = None,
     label: str | None = None,
     queue_num: str | None = None,
+    anon: int | None = None,
 ) -> None:
-    """Обновляет анкету; username освежается при каждой правке (мог появиться/смениться)."""
+    """Обновляет анкету; username освежается при каждой правке (мог появиться/смениться).
+    anon=None — не трогать флаг «скрыть ник»."""
     with _connect() as conn:
         conn.execute(
             """UPDATE reports SET queue_date = ?, queue_time = ?, letter_date = ?,
                slots = ?, submit_date = ?, passport_date = ?, outcome = ?,
                suspect = ?, suspect_reason = ?, username = ?, visa_days = ?, subcategory = ?,
-               label = ?, queue_num = ?, updated_at = ? WHERE id = ?""",
+               label = ?, queue_num = ?, anon = COALESCE(?, anon), updated_at = ? WHERE id = ?""",
             (queue_date, queue_time, letter_date, slots, submit_date,
              passport_date, outcome, suspect, suspect_reason, username, visa_days, subcategory,
-             label, queue_num, _now(), report_id),
+             label, queue_num, anon, _now(), report_id),
         )
+
+
+def set_anon(report_id: int, anon: bool) -> None:
+    """Скрыть/показать ник автора в публичных постах и списках."""
+    with _connect() as conn:
+        conn.execute("UPDATE reports SET anon = ?, updated_at = ? WHERE id = ?",
+                     (1 if anon else 0, _now(), report_id))
 
 
 def log_event(user_id: int, event: str) -> None:
