@@ -424,6 +424,8 @@ class FrontForecast:
     letters: list = field(default_factory=list)   # [(момент постановки, дата письма)] — для графика
     weekly: list = field(default_factory=list)    # [(середина недели письма, фронт недели)]
     reg_from: date | None = None                  # с какой даты считалась скорость
+    n_letters: int = 0                            # писем в срезе (без сомнительных)
+    user_passed: bool = False                     # фронт уже прошёл постановку пользователя
 
 
 def _queue_dt(qd: date, qt: str | None, default_h: int = 0) -> datetime:
@@ -450,9 +452,12 @@ def front_forecast(city: str, visa_type: str, queue_date: date, queue_time: str 
         q, l = _try_d(r["queue_date"]), _try_d(r["letter_date"])
         if q and l and l >= q:
             got.append((_queue_dt(q, r["queue_time"]), l))
-    if len(got) < FRONT_MIN_LETTERS:
+    if not got:
         return FrontForecast("nodata")
     front = max(q for q, _ in got)
+    user_dt = _queue_dt(queue_date, queue_time, default_h=12)  # без времени — середина дня
+    if len(got) < FRONT_MIN_LETTERS:  # фронт показать можно, скорость по такому числу писем — нет
+        return FrontForecast("nodata", front=front, n_letters=len(got), user_passed=user_dt <= front)
     weeks: dict[date, datetime] = {}
     for q, l in got:
         wk = l - timedelta(days=l.weekday())
@@ -463,8 +468,8 @@ def front_forecast(city: str, visa_type: str, queue_date: date, queue_time: str 
     if len(reg) < FRONT_MIN_WEEKS:
         reg = pts[-FRONT_MIN_WEEKS:]
     if len(reg) < FRONT_MIN_WEEKS:
-        return FrontForecast("nodata", front=front)
-    extra = dict(letters=got, weekly=pts, reg_from=reg[0][0])
+        return FrontForecast("nodata", front=front, n_letters=len(got), user_passed=user_dt <= front)
+    extra = dict(letters=got, weekly=pts, reg_from=reg[0][0], n_letters=len(got))
     xs = [(x - today).days for x, _ in reg]
     ys = [(y - now0).total_seconds() / 86400 for _, y in reg]
     mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
@@ -473,7 +478,6 @@ def front_forecast(city: str, visa_type: str, queue_date: date, queue_time: str 
     speed = max(speed, 0.0)
     last_adv = min(l for q, l in got if q == front)
     stalled_weeks = max(0, (today - last_adv).days // 7)
-    user_dt = _queue_dt(queue_date, queue_time, default_h=12)  # без времени — середина дня
     if user_dt <= front:
         return FrontForecast("passed", front, speed, None, stalled_weeks, bool(queue_time), **extra)
     if speed * 7 * 24 < FRONT_MIN_SPEED_H:
@@ -502,9 +506,14 @@ def _fmt_speed(speed: float) -> str:
 
 def front_forecast_lines(ff: FrontForecast, today: date) -> list[str]:
     """Строки для персонального прогноза по методу скорости фронта."""
-    if ff.status == "nodata" or ff.front is None:
+    if ff.front is None:
         return []
     head = "По скорости движения очереди:"
+    if ff.status == "nodata":
+        fr = _fmt_front(ff.front, 0.0)
+        tail = " Ваша очередь уже пройдена." if ff.user_passed else ""
+        return [f"{head} приглашения дошли до вставших <b>{fr}</b>; писем по этому городу и типу визы "
+                f"пока мало ({ff.n_letters}), скорость очереди не оцениваем.{tail}"]
     fr = _fmt_front(ff.front, ff.speed)
     hint = ("" if ff.user_time_known
             else " (укажите в анкете время постановки — прогноз станет точнее)")
