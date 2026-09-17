@@ -181,6 +181,9 @@ def fmt_slots(slots: list[list[str]] | None) -> str:
     return ", ".join(parts)
 
 
+GROUP_LINK = "https://t.me/vfspolandstats"
+
+
 def post_link(message_id: int) -> str:
     return f"https://t.me/c/{CHAT_LINK_ID}/{message_id}"
 
@@ -1407,6 +1410,7 @@ async def confirm_yes(callback: CallbackQuery, state: FSMContext) -> None:
             text="🔮 Мой прогноз", callback_data=f"mgo:{data['city']}:{data['visa_type']}"
         )]
     )
+    buttons.append([InlineKeyboardButton(text="💬 Перейти в группу", url=GROUP_LINK)])
     total = len(db.reports_for(data["city"], data["visa_type"]))
     when = fmt(data["queue_date"])
     if data.get("queue_time"):
@@ -1422,7 +1426,8 @@ async def confirm_yes(callback: CallbackQuery, state: FSMContext) -> None:
         f"Ваш вклад в статистику: по {data['city']} теперь <b>{total}</b> анкет — "
         "точность прогнозов растёт.\n"
         "Пришло письмо, подали документы, получили паспорт? Дополните анкету "
-        "в любой момент: /report",
+        "в любой момент: /report\n\n"
+        "Обсуждение и вопросы — в группе, ваша анкета уже опубликована в теме города 👇",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
     if data.get("letter_date"):
@@ -1672,11 +1677,13 @@ async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> N
         except TelegramBadRequest:
             pass  # текст не изменился — не страшно
 
-    kb = None
+    rows_kb = []
     if final_message_id:
-        kb = _kb(
+        rows_kb.append(
             [InlineKeyboardButton(text="👀 Посмотреть публикацию", url=post_link(final_message_id))]
         )
+    rows_kb.append([InlineKeyboardButton(text="💬 Перейти в группу", url=GROUP_LINK)])
+    kb = _kb(*rows_kb)
     db.log_event(user.id, "saved_edit")
     await callback.message.edit_text(
         "✅ Анкета обновлена, публикация в группе изменена.\n\nЕсли что-то ещё — /report",

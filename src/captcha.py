@@ -86,6 +86,8 @@ async def on_captcha_click(callback: CallbackQuery) -> None:
             "Встали в очередь VFS? Заполните анкету прямо сейчас — это займёт минуту, "
             "а статистика и прогнозы группы станут точнее.\n\n"
             "Подсказки:\n"
+            "• Группа и этот бот — два разных чата: общение в группе, анкета и прогнозы — "
+            "здесь. Вернуться в группу — кнопка «Перейти в группу» ниже или список чатов.\n"
             "• Темы городов — витрины статистики, писать в них может только бот.\n"
             "• Анкета: кнопка ниже, команда /report или кнопки под сообщениями в темах.\n"
             "• Очередь по порядку постановки (город + тип визы) — /queue; "
@@ -101,6 +103,8 @@ async def on_captcha_click(callback: CallbackQuery) -> None:
                     [InlineKeyboardButton(
                         text="📝 Заполнить анкету", url=f"https://t.me/{me.username}?start=go"
                     )],
+                    # во всю ширину: из лички бота люди не находят дорогу обратно в группу
+                    [InlineKeyboardButton(text="💬 Перейти в группу", url=GROUP_LINK)],
                     [
                         InlineKeyboardButton(
                             text="📊 Статистика", url=f"https://t.me/{me.username}?start=menu_stats"
@@ -111,14 +115,11 @@ async def on_captcha_click(callback: CallbackQuery) -> None:
                     ],
                     [
                         InlineKeyboardButton(
-                            text="📋 Документы и FAQ", url=f"https://t.me/{me.username}?start=docs"
+                            text="📋 Документы", url=f"https://t.me/{me.username}?start=docs"
                         ),
                         InlineKeyboardButton(text="📖 Инструкция", url=HOWTO_LINK),
                     ],
-                    [
-                        InlineKeyboardButton(text="🌐 Сайт vfsstats.by", url="https://vfsstats.by/"),
-                        InlineKeyboardButton(text="➡️ Перейти в группу", url=GROUP_LINK),
-                    ],
+                    [InlineKeyboardButton(text="🌐 Сайт vfsstats.by", url="https://vfsstats.by/")],
                 ]
             ),
         )
