@@ -260,6 +260,16 @@ async def queue_deeplink(message: Message, command: CommandObject, state: FSMCon
         )
 
 
+@router.message(CommandStart(deep_link=True, magic=F.args == "menu_queue"))
+async def queue_menu_deeplink(message: Message, command: CommandObject, state: FSMContext) -> None:
+    """Кнопка «Очередь по постановке» из инструкции/приветствия: выбор города, как /queue."""
+    await state.clear()
+    await message.answer(
+        "Очередь какого города показать (по порядку постановки)?",
+        reply_markup=_queue_city_kb(),
+    )
+
+
 @router.message(Command("queue"), F.chat.type == "private")
 async def cmd_queue(message: Message, command: CommandObject) -> None:
     city = _resolve_city(command.args)
