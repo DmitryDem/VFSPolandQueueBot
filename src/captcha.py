@@ -31,7 +31,7 @@ GENERAL_TOPIC = TOPICS["service_topics"]["general"]
 # публичная ссылка на группу (не на тему): откроет список тем или чат — как настроено у пользователя
 GROUP_LINK = "https://t.me/vfspolandstats"
 GENERAL_LINK = f"https://t.me/c/{str(CHAT_ID).removeprefix('-100')}/{GENERAL_TOPIC}"
-# тема «📖 Как пользоваться ботом» (закрытая, с инструкцией и deep-link кнопками)
+# тема «📖 Как узнать очередь и прогноз: инструкция» (закрытая, с инструкцией и deep-link кнопками)
 HOWTO_TOPIC = TOPICS["service_topics"].get("howto")
 HOWTO_LINK = (
     f"https://t.me/c/{str(CHAT_ID).removeprefix('-100')}/{HOWTO_TOPIC}" if HOWTO_TOPIC else GENERAL_LINK
@@ -95,7 +95,7 @@ async def on_captcha_click(callback: CallbackQuery) -> None:
             "• Очередь по порядку постановки (город + тип визы) — /queue; "
             "«люди рядом» с вами — /near; все анкеты города — /list.\n"
             "• Статистика и прогноз: /stats и /my.\n"
-            "• Полная инструкция — в теме «📖 Как пользоваться ботом» (кнопка ниже).\n"
+            "• Полная инструкция — в теме «📖 Как узнать очередь и прогноз: инструкция» (кнопка ниже).\n"
             "• Сроки и статистика по городам — также на сайте vfsstats.by.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
