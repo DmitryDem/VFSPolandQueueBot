@@ -1119,6 +1119,12 @@ async def input_letter_date(message: Message, state: FSMContext) -> None:
         await message.answer("Не понял дату. Формат: ДД.ММ.ГГГГ, или нажмите кнопку «Письмо ещё не пришло».")
         return
     data = await state.get_data()
+    if d > date.today():
+        await message.answer(
+            f"Дата письма в будущем ({d.strftime('%d.%m.%Y')}) — так не бывает. "
+            f"Проверьте год: сегодня {date.today().strftime('%d.%m.%Y')}. Введите дату ещё раз."
+        )
+        return
     if d.isoformat() < data["queue_date"]:
         await message.answer("Дата письма раньше даты постановки в очередь — так не бывает. Проверьте и введите ещё раз.")
         return
