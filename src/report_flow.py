@@ -907,9 +907,8 @@ FUNNEL_STEPS = [
 
 @router.message(Command("funnel"))
 async def cmd_funnel(message: Message, command: CommandObject) -> None:
-    admin = _admin_id()
-    if not admin or message.from_user.id != admin:
-        await message.answer("Команда доступна только владельцу группы.")
+    if message.from_user.id not in admin_ids():
+        await message.answer("Команда доступна только администраторам группы.")
         return
     try:
         days = max(1, min(90, int(command.args))) if command.args else 7
@@ -1447,8 +1446,19 @@ async def confirm_yes(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 def _admin_id() -> int | None:
+    """Владелец: сюда приходят уведомления (сомнительные анкеты и т.п.)."""
     admin = os.environ.get("ADMIN_CHAT_ID")
     return int(admin) if admin else None
+
+
+def admin_ids() -> set[int]:
+    """Все, кому доступны админ-команды: владелец (ADMIN_CHAT_ID) + ADMIN_IDS (через запятую)."""
+    ids = {a for a in [_admin_id()] if a}
+    for tok in os.environ.get("ADMIN_IDS", "").replace(";", ",").split(","):
+        tok = tok.strip()
+        if tok.isdigit():
+            ids.add(int(tok))
+    return ids
 
 
 async def _notify_admin_suspect(bot, report_id: int, data: dict, user) -> None:
@@ -1489,8 +1499,7 @@ async def _notify_admin_suspect(bot, report_id: int, data: dict, user) -> None:
 
 @router.callback_query(F.data.startswith("adm:"))
 async def admin_decision(callback: CallbackQuery) -> None:
-    admin = _admin_id()
-    if not admin or callback.from_user.id != admin:
+    if callback.from_user.id not in admin_ids():
         await callback.answer("Кнопка только для администратора.", show_alert=True)
         return
     _, action, report_id = callback.data.split(":", 2)

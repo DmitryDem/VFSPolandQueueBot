@@ -207,15 +207,16 @@ async def main() -> None:
         BotCommand(command="cancel", description="Отменить текущую анкету"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
-    admin_id = os.environ.get("ADMIN_CHAT_ID")
-    if admin_id:  # админские команды видны только в личке администратора
-        await bot.set_my_commands(
-            commands + [
-                BotCommand(command="stale", description="Админ: анкеты позади фронта (вышли; online [мес] — в чате)"),
-                BotCommand(command="who", description="Админ: автор анкеты по номеру или нику"),
-            ],
-            scope=BotCommandScopeChat(chat_id=int(admin_id)),
-        )
+    from src.report_flow import admin_ids
+    admin_cmds = commands + [
+        BotCommand(command="stale", description="Админ: анкеты позади фронта (вышли; online [мес] — в чате)"),
+        BotCommand(command="who", description="Админ: автор анкеты по номеру или нику"),
+    ]
+    for aid in admin_ids():  # админские команды видны только в личках администраторов
+        try:
+            await bot.set_my_commands(admin_cmds, scope=BotCommandScopeChat(chat_id=aid))
+        except TelegramBadRequest as e:  # админ ещё не открывал личку с ботом
+            log.warning("не удалось задать админ-команды для %s: %s", aid, e)
     await bot.delete_webhook(drop_pending_updates=False)
     asyncio.create_task(daily_summary_loop(bot))
     asyncio.create_task(membership_refresh_loop(bot))

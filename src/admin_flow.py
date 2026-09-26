@@ -15,7 +15,7 @@ from aiogram.filters import Command, CommandObject, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from src import db, stats
-from src.report_flow import CHAT_ID, VISA_TYPES, _admin_id, _retire_invite, fmt, post_link, row_author, user_label
+from src.report_flow import CHAT_ID, VISA_TYPES, _retire_invite, admin_ids, fmt, post_link, row_author, user_label
 
 log = logging.getLogger("admin")
 router = Router()
@@ -25,8 +25,7 @@ TOMBSTONE = "⚠️ Анкета неактуальна — удалена."
 
 
 def _is_admin(user_id: int) -> bool:
-    admin = _admin_id()
-    return bool(admin) and user_id == admin
+    return user_id in admin_ids()
 
 
 def _d(iso: str) -> date:
