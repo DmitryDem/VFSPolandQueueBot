@@ -11,7 +11,7 @@ from datetime import date, datetime
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command, CommandObject, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from src import db, stats
@@ -33,7 +33,25 @@ def _d(iso: str) -> date:
     return datetime.strptime(iso[:10], "%Y-%m-%d").date()
 
 
-def _card(r, today: date) -> tuple[str, InlineKeyboardMarkup]:
+ONLINE_WORDS = ("online", "онлайн", "chat", "чат", "в", "вчате", "here")
+MONTH_DAYS = 30
+
+
+def _parse_stale_args(args: str | None) -> tuple[bool, int]:
+    """(online, months): `/stale` → (False, 0); `/stale online` → (True, 1); `/stale online 2` → (True, 2);
+    `/stale 2` → (False, 2) — вышедшие, отставшие ≥ 2 мес."""
+    online, months = False, 0
+    for tok in (args or "").lower().replace(",", " ").split():
+        if tok in ONLINE_WORDS:
+            online = True
+        elif tok.isdigit():
+            months = int(tok)
+    if online and months == 0:
+        months = 1
+    return online, months
+
+
+def _card(r, today: date, in_chat: bool = False) -> tuple[str, InlineKeyboardMarkup]:
     q, f = _d(r["queue_date"]), _d(r["front"])
     when = fmt(r["queue_date"]) + (f" в {r['queue_time']}" if r["queue_time"] else "")
     text = (
@@ -41,7 +59,7 @@ def _card(r, today: date) -> tuple[str, InlineKeyboardMarkup]:
         f"👤 {user_label(r['username'], 'без ника')} (id {r['user_id']}) · анкета #{r['id']}\n"
         f"⏳ Постановка {when} · PLB {r['queue_num'] or '—'}\n"
         f"📍 Фронт {fmt(r['front'])} → отстал на <b>{(f - q).days} дн.</b> · ждёт {(today - q).days} дн.\n"
-        "❌ Автор вышел из чата"
+        + ("✅ Автор в чате" if in_chat else "❌ Автор вышел из чата")
     )
     rows = [[
         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"stale:del:{r['id']}"),
@@ -53,38 +71,49 @@ def _card(r, today: date) -> tuple[str, InlineKeyboardMarkup]:
 
 
 @router.message(Command("stale"))
-async def cmd_stale(message: Message) -> None:
+async def cmd_stale(message: Message, command: CommandObject) -> None:
+    """/stale — позади фронта + автор вышел из чата (как раньше).
+    /stale online [N] — позади фронта на ≥ N месяцев (по умолчанию 1) + автор ЕЩЁ В ЧАТЕ.
+    /stale N — вышедшие, отставшие на ≥ N месяцев."""
     if not _is_admin(message.from_user.id):
         return
+    online, months = _parse_stale_args(command.args)
+    min_lag = months * MONTH_DAYS
     rows = db.pending_behind_front()
+    if min_lag:
+        rows = [r for r in rows if (_d(r["front"]) - _d(r["queue_date"])).days >= min_lag]
+    who = "автор в чате" if online else "автор вышел из чата"
+    lag_txt = f" на ≥ {months} мес." if months else ""
     if not rows:
-        await message.answer("Позади фронта без письма никого нет.")
+        await message.answer(f"Позади фронта{lag_txt} без письма никого нет.")
         return
     status = await message.answer(
-        f"Позади фронта без письма: <b>{len(rows)}</b>. Проверяю, кто вышел из чата…"
+        f"Позади фронта{lag_txt} без письма: <b>{len(rows)}</b>. Проверяю членство в чате…"
     )
-    left = []
+    picked = []
     for r in rows:
         try:
             member = await message.bot.get_chat_member(CHAT_ID, r["user_id"])
             st = member.status
         except TelegramBadRequest:
             st = "unknown"
-        if st in ("left", "kicked"):
-            left.append(r)
+        is_left = st in ("left", "kicked")
+        keep = (not is_left and st != "unknown") if online else is_left
+        if keep:
+            picked.append(r)
         await asyncio.sleep(0.1)
-    if not left:
+    if not picked:
         await status.edit_text(
-            f"Позади фронта {len(rows)} анкет, но все авторы в чате — удалять нечего."
+            f"Позади фронта{lag_txt} {len(rows)} анкет, но с условием «{who}» — ни одной."
         )
         return
     await status.edit_text(
-        f"Позади фронта <b>{len(rows)}</b> анкет; авторы вышли из чата — <b>{len(left)}</b>. "
+        f"Позади фронта{lag_txt} <b>{len(rows)}</b> анкет; {who} — <b>{len(picked)}</b>. "
         "Карточки ниже, решение по каждой 👇"
     )
     today = date.today()
-    for r in sorted(left, key=lambda x: (_d(x["queue_date"]) - _d(x["front"])).days):
-        text, kb = _card(r, today)
+    for r in sorted(picked, key=lambda x: (_d(x["queue_date"]) - _d(x["front"])).days):
+        text, kb = _card(r, today, in_chat=online)
         await message.answer(text, reply_markup=kb)
         await asyncio.sleep(0.15)
 
