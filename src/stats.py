@@ -1137,46 +1137,13 @@ def render_median_trend_chart(s: Stats, visa_label: str, today: date | None = No
     return _save(fig, f"очередь {word}: {delta:+d} дн. за период · срез {_fmt(today)}")
 
 
-def render_queue_chart(s: Stats, visa_label: str) -> str | None:
-    """Постановки в очередь: по месяцам + по дням последнего активного месяца."""
-    if not s.queue_months:
-        return None
-    two = len(s.queue_days) >= 2
-    fig, axes = plt.subplots(2 if two else 1, 1, figsize=(8.4, 8 if two else 4.6), dpi=150)
-    fig.patch.set_facecolor(SURFACE)
-    ax1 = axes[0] if two else axes
-
-    labels = [m for m, _ in s.queue_months]
-    values = [c for _, c in s.queue_months]
-    _style(ax1, f"{s.city} — {visa_label} · Постановки в очередь по месяцам")
-    ax1.bar(labels, values, color=BLUE, width=0.6, zorder=2)
-    for x, v in zip(labels, values):
-        ax1.text(x, v + max(values) * 0.02, str(v), ha="center", color=INK, fontsize=9)
-    ax1.set_ylabel("человек (по анкетам)", color=INK2, fontsize=9)
-    if len(labels) > 8:
-        ax1.tick_params(axis="x", rotation=45)
-
-    if two:
-        ax2 = axes[1]
-        _style(ax2, f"Постановки по дням, {s.active_month} (без выбросов)")
-        xs = sorted(s.queue_days)
-        ax2.bar([d.strftime("%d.%m") for d in xs], [s.queue_days[d] for d in xs],
-                color=GREEN, width=0.6, zorder=2)
-        ax2.set_ylabel("человек", color=INK2, fontsize=9)
-        ax2.yaxis.get_major_locator().set_params(integer=True)
-        if len(xs) > 10:
-            ax2.tick_params(axis="x", rotation=45)
-    ax1.yaxis.get_major_locator().set_params(integer=True)
-    return _save(fig)
-
-
 def charts_for(s: Stats, visa_label: str) -> list[str]:
     """Все доступные графики для /stats (пути к PNG)."""
     charts = [
         render_chart(s, visa_label),
         render_front_chart(s, visa_label),
         render_median_trend_chart(s, visa_label),
-        render_queue_chart(s, visa_label),
+        # график «постановки в очередь по месяцам/дням» убран (2026-09-30): пользы не давал
     ]
     return [c for c in charts if c]
 
