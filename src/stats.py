@@ -355,16 +355,6 @@ def build_text(s: Stats, visa_label: str, today: date | None = None) -> str:
             pct = round(100 * done / total) if total else 0
             lines.append(f"<code>{month} {_bar(pct, 10)} {pct}% ({done}/{total})</code>")
 
-    if s.active_month and s.queue_days:
-        joined = sum(s.queue_days.values())
-        lines.append("")
-        lines.append(
-            f"📥 В {s.active_month} встали в очередь <b>{joined}</b> чел. "
-            "(по дням — на графике)"
-        )
-        if s.queue_day_outliers:
-            dropped = ", ".join(_fmt(d) for d in sorted(s.queue_day_outliers))
-            lines.append(f"<i>исключены как вероятные ошибки: {dropped}</i>")
 
     lines.append("")
     if s.forecast_wait is not None:
