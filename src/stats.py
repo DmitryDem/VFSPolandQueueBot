@@ -602,7 +602,7 @@ def render_front_overview_chart(city: str, visa_type: str, visa_label: str,
     import matplotlib.dates as mdates
     red = "#d71437"
     fig, ax = _fig(5.4)
-    _style(ax, f"{city} — {visa_label} · Докуда дошла очередь и как быстро идёт")
+    _style(ax, f"{city} — {visa_label} · Докуда дошла очередь")
     ax.grid(axis="x", color=GRID, linewidth=0.8)
     ax.scatter([l for _, l in ff.letters], [q for q, _ in ff.letters], s=16, color=BLUE, alpha=0.55,
                zorder=3, label="письма: когда пришло → когда встал в очередь")
@@ -626,7 +626,8 @@ def render_front_overview_chart(city: str, visa_type: str, visa_label: str,
             ax.axhspan(ff.front, top, color=NEUTRAL, alpha=0.35, zorder=1,
                        label=f"ещё ждут: {len(pend)} чел. (постановка {pend[0]:%d.%m}–{pend[-1]:%d.%m})")
     ax.axvline(today, color=INK2, linewidth=0.9, linestyle=":", zorder=2)
-    ax.text(today, ff.front, " сегодня", color=INK2, fontsize=8, va="bottom")
+    ax.text(today, 0.98, " сегодня", color=INK2, fontsize=8, va="top",
+            transform=ax.get_xaxis_transform())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
     ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=8))
     ax.yaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=7))
