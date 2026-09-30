@@ -1047,37 +1047,6 @@ def _fig(h: float = 4.6):
     return fig, ax
 
 
-def render_chart(s: Stats, visa_label: str, days: int = 30, today: date | None = None) -> str | None:
-    """Приглашения за `days` дней: бары + среднее за 7 дней."""
-    today = today or date.today()
-    start = today - timedelta(days=days - 1)
-    xs = [start + timedelta(days=i) for i in range(days)]
-    vals = [s.counts.get(d, 0) for d in xs]
-    if sum(1 for v in vals if v) < 2:
-        return None
-    ma = [sum(vals[max(0, i - 6):i + 1]) / len(vals[max(0, i - 6):i + 1]) for i in range(days)]
-
-    fig, ax = _fig()
-    _style(ax, f"{s.city} — {visa_label} · Приглашения в ВЦ, {days} дней")
-    ax.bar(xs, vals, color=BLUE, width=0.72, zorder=2, label="приглашений за день")
-    ax.plot(xs, ma, color=GREEN, linewidth=2, zorder=3, label="среднее за 7 дней")
-    nonzero = [i for i, v in enumerate(vals) if v]
-    peak = max(nonzero, key=lambda i: vals[i])
-    for i in {peak, nonzero[-1]}:
-        ax.text(xs[i], vals[i] + max(vals) * 0.03, str(vals[i]), ha="center",
-                color=INK, fontsize=9, fontweight="bold")
-    ax.set_ylabel("приглашений (по анкетам)", color=INK2, fontsize=9)
-    ax.legend(loc="upper left", frameon=False, fontsize=9, labelcolor=INK2)
-    ax.set_xticks(xs[::5])
-    ax.set_xticklabels([d.strftime("%d.%m") for d in xs[::5]])
-    ax.margins(x=0.02)
-    note = f"срез {_fmt(today)}"
-    if s.outliers:
-        note = "исключены как ошибки: " + ", ".join(
-            d.strftime("%d.%m") for d in sorted(s.outliers)) + " · " + note
-    return _save(fig, note)
-
-
 def render_front_chart(s: Stats, visa_label: str, today: date | None = None) -> str | None:
     """Фронт очереди: месяц постановки × (письмо получено | ещё ждут)."""
     today = today or date.today()
@@ -1130,7 +1099,7 @@ def render_median_trend_chart(s: Stats, visa_label: str, today: date | None = No
 def charts_for(s: Stats, visa_label: str) -> list[str]:
     """Все доступные графики для /stats (пути к PNG)."""
     charts = [
-        render_chart(s, visa_label),
+        # «приглашения в ВЦ за 30 дней» убран (2026-09-30): волны видны в тексте сводки
         render_front_chart(s, visa_label),
         render_median_trend_chart(s, visa_label),
         # график «постановки в очередь по месяцам/дням» убран (2026-09-30): пользы не давал
