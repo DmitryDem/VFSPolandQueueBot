@@ -591,6 +591,55 @@ def render_front_speed_chart(city: str, visa_label: str, ff: FrontForecast, queu
     return _save(fig, f"скорость — по последним {FRONT_REG_WEEKS} нед. · сомнительные анкеты исключены · срез {_fmt(today)}")
 
 
+def render_front_overview_chart(city: str, visa_type: str, visa_label: str,
+                                today: date | None = None) -> str | None:
+    """Для /stats: докуда дошла очередь и как быстро идёт (общий вид, без личной линии).
+    Письма, недельный фронт, линия скорости с продлением на 2 месяца, серая полоса ждущих."""
+    today = today or date.today()
+    ff = front_forecast(city, visa_type, today, None, today)
+    if ff.status == "nodata" or not ff.letters or not ff.weekly or ff.front is None:
+        return None
+    import matplotlib.dates as mdates
+    red = "#d71437"
+    fig, ax = _fig(5.4)
+    _style(ax, f"{city} — {visa_label} · Докуда дошла очередь и как быстро идёт")
+    ax.grid(axis="x", color=GRID, linewidth=0.8)
+    ax.scatter([l for _, l in ff.letters], [q for q, _ in ff.letters], s=16, color=BLUE, alpha=0.55,
+               zorder=3, label="письма: когда пришло → когда встал в очередь")
+    ax.plot([x for x, _ in ff.weekly], [y for _, y in ff.weekly], color=INK, linewidth=1.6, zorder=4,
+            label="фронт по неделям (докуда дошли приглашения)")
+    x0 = ff.reg_from or ff.weekly[0][0]
+    x1 = today + timedelta(days=60)
+
+    def at(x: date) -> datetime:
+        return ff.front + timedelta(days=ff.speed * (x - today).days)
+
+    ax.plot([x0, today], [at(x0), ff.front], color=red, linewidth=2, zorder=5,
+            label=f"скорость очереди: {_fmt_speed(ff.speed)}")
+    ax.plot([today, x1], [ff.front, at(x1)], color=red, linewidth=2, linestyle="--", zorder=5,
+            label="продление при той же скорости")
+    pend = sorted(_try_d(r["queue_date"]) for r in db.reports_for(city, visa_type)
+                  if not r["suspect"] and not r["letter_date"] and _try_d(r["queue_date"]))
+    if pend:
+        top = datetime.combine(pend[-1], datetime.min.time())
+        if top > ff.front:
+            ax.axhspan(ff.front, top, color=NEUTRAL, alpha=0.35, zorder=1,
+                       label=f"ещё ждут: {len(pend)} чел. (постановка {pend[0]:%d.%m}–{pend[-1]:%d.%m})")
+    ax.axvline(today, color=INK2, linewidth=0.9, linestyle=":", zorder=2)
+    ax.text(today, ff.front, " сегодня", color=INK2, fontsize=8, va="bottom")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=8))
+    ax.yaxis.set_major_locator(mdates.AutoDateLocator(minticks=4, maxticks=7))
+    ax.yaxis.set_major_formatter(mdates.DateFormatter("%d.%m"))
+    ax.set_xlabel("когда пришло письмо", color=INK2, fontsize=9)
+    ax.set_ylabel("дата постановки в очередь", color=INK2, fontsize=9)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2, frameon=False, fontsize=8,
+              labelcolor=INK2)
+    ax.margins(x=0.03, y=0.08)
+    return _save(fig, f"фронт {_fmt_front(ff.front, ff.speed)} · скорость по последним {FRONT_REG_WEEKS} нед. · "
+                      f"n = {ff.n_letters} писем · срез {_fmt(today)}")
+
+
 def build_personal_forecast(
     s: Stats,
     visa_label: str,
@@ -1102,6 +1151,7 @@ def charts_for(s: Stats, visa_label: str) -> list[str]:
         # «приглашения в ВЦ за 30 дней» убран (2026-09-30): волны видны в тексте сводки
         render_front_chart(s, visa_label),
         render_median_trend_chart(s, visa_label),
+        render_front_overview_chart(s.city, s.visa_type, visa_label),
         # график «постановки в очередь по месяцам/дням» убран (2026-09-30): пользы не давал
     ]
     return [c for c in charts if c]
