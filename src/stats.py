@@ -939,7 +939,7 @@ def build_daily_summary(
             if s.total == 0:
                 continue
             has_data = True
-            parts = [f"анкет {s.total}"]
+            parts = []  # число анкет убрано (2026-10-01): читателю важны сроки и фронт
             if s.median_wait is not None:
                 parts.append(f"медиана {s.median_wait} дн.")
             if s.last_letter and s.front_queue_date:
@@ -949,7 +949,7 @@ def build_daily_summary(
                 parts.append(
                     f"посл. письмо {s.last_letter.strftime('%d.%m')} → очередь дошла до {front}"
                 )
-            lines.append(f"• <b>{city}, {label}</b>: {', '.join(parts)}")
+            lines.append(f"• <b>{city}, {label}</b>: {', '.join(parts) or 'писем пока нет'}")
     if not has_data:
         return None
     lines.append("")
