@@ -49,6 +49,8 @@ VISA_TERM_MIN = 3           # минимум анкет со сроком виз
 VISA_TERM_BUCKETS = [(29, "под поездку"), (45, "1 месяц"), (135, "3 месяца"),
                      (270, "полгода"), (450, "1 год"), (900, "2 года")]
 WAIT_CHART_MIN_EVENTS = 6   # минимум писем, чтобы город попал на график ожидания (город×тип)
+SLOT_MAX_HORIZON_DAYS = 14  # даты записи в ВЦ дальше этого от письма считаем ошибкой ввода
+SLOT_MIN_ANKETS = 2         # минимум анкет со слотами в волне, чтобы верить «записи до …»
 KM_FORECAST_MIN_EVENTS = 8  # минимум писем для KM-оценки в персональном прогнозе (город×тип)
 
 BOT_TAG = "@Visa_Poland_Info_Bot"
@@ -101,6 +103,8 @@ class Stats:
     last_letter: date | None = None      # дата самого свежего письма
     front_queue_date: date | None = None # самая поздняя постановка среди получивших письмо
     front_queue_time: str | None = None  # её время (если указано)
+    slots_until: date | None = None      # до какой даты раздали записи в ВЦ в последних волнах
+    slots_until_wave: date | None = None # дата письма волны, по которой посчитано
 
 
 # ---------- кеш ----------
@@ -169,6 +173,7 @@ def collect(city: str, visa_type: str, today: date | None = None) -> Stats:
     month_completed: Counter = Counter()
     queue_dates: list[date] = []
     passport_waits: list[int] = []
+    slot_ends: dict[date, list[date]] = {}  # дата письма -> даты записи (в пределах SLOT_MAX_HORIZON_DAYS)
 
     for row in db.reports_for(city, visa_type):
         s.total += 1
@@ -199,14 +204,29 @@ def collect(city: str, visa_type: str, today: date | None = None) -> Stats:
                 s.last_letter = ld
             if row["slots"]:
                 try:
-                    first_slot = min(_d(pair[0]) for pair in json.loads(row["slots"]))
+                    pairs = json.loads(row["slots"])
+                    first_slot = min(_d(pair[0]) for pair in pairs)
                     h = (first_slot - ld).days
                     if h >= 0:
                         horizons.append((ld, h))
+                    ends = [_d(x) for pair in pairs for x in pair
+                            if 0 <= (_d(x) - ld).days <= SLOT_MAX_HORIZON_DAYS]
+                    if ends:
+                        slot_ends.setdefault(ld, []).append(max(ends))
                 except (ValueError, TypeError):
                     pass
         else:
             s.pending.append(qd)
+
+    # до какой даты раздали записи в ВЦ: последняя волна, если в ней >= SLOT_MIN_ANKETS анкет
+    # со слотами; иначе — две последние волны вместе
+    if slot_ends:
+        waves = sorted(slot_ends, reverse=True)
+        chosen = waves[:1] if len(slot_ends[waves[0]]) >= SLOT_MIN_ANKETS else waves[:2]
+        vals = [e for w in chosen for e in slot_ends[w]]
+        if len(vals) >= SLOT_MIN_ANKETS:
+            s.slots_until = max(vals)
+            s.slots_until_wave = waves[0]
 
     raw_counts = Counter(ld for _, ld in s.completed)
     s.counts, s.outliers = drop_outliers(dict(raw_counts), today)
@@ -314,6 +334,10 @@ def build_text(s: Stats, visa_label: str, today: date | None = None) -> str:
         lines.append(
             f"🚀 Скорость: <b>~{s.velocity:.1f} приглашений/день</b>"
             f"{_trend_arrow(s.velocity, s.velocity_prev)}"
+        )
+    if s.slots_until:
+        lines.append(
+            f"📅 По последней волне записи в ВЦ раздавали до <b>{_fmt(s.slots_until)}</b>"
         )
     if s.horizon_median is not None:
         horizon = f"🗓 Слот после письма: ~<b>{s.horizon_median} дн.</b>"
@@ -949,6 +973,8 @@ def build_daily_summary(
                 parts.append(
                     f"посл. письмо {s.last_letter.strftime('%d.%m')} → очередь дошла до {front}"
                 )
+            if s.slots_until:
+                parts.append(f"записи в ВЦ до {s.slots_until.strftime('%d.%m')}")
             lines.append(f"• <b>{city}, {label}</b>: {', '.join(parts) or 'писем пока нет'}")
     if not has_data:
         return None
