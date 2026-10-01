@@ -975,7 +975,7 @@ def build_daily_summary(
                 front = s.front_queue_date.strftime("%d.%m")
                 if s.front_queue_time:
                     front += f" {s.front_queue_time}"
-                parts.append(f"очередь дошла до <b>{front}</b>")
+                parts.append(f"очередь дошла до <b><u>{front}</u></b>")
             lines.append(f"• <b>{city}, {label}</b>: {', '.join(parts) or 'писем пока нет'}")
     if not has_data:
         return None
