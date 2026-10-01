@@ -49,7 +49,7 @@ VISA_TERM_MIN = 3           # минимум анкет со сроком виз
 VISA_TERM_BUCKETS = [(29, "под поездку"), (45, "1 месяц"), (135, "3 месяца"),
                      (270, "полгода"), (450, "1 год"), (900, "2 года")]
 WAIT_CHART_MIN_EVENTS = 6   # минимум писем, чтобы город попал на график ожидания (город×тип)
-SLOT_MAX_HORIZON_DAYS = 14  # даты записи в ВЦ дальше этого от письма считаем ошибкой ввода
+SLOT_MAX_HORIZON_DAYS = 14  # БУДУЩИЕ даты записи дальше этого от письма считаем ошибкой ввода
 SLOT_MIN_ANKETS = 2         # минимум анкет со слотами в волне, чтобы верить «записи до …»
 KM_FORECAST_MIN_EVENTS = 8  # минимум писем для KM-оценки в персональном прогнозе (город×тип)
 
@@ -209,8 +209,11 @@ def collect(city: str, visa_type: str, today: date | None = None) -> Stats:
                     h = (first_slot - ld).days
                     if h >= 0:
                         horizons.append((ld, h))
+                    # даты записи не раньше письма; будущие — не дальше SLOT_MAX_HORIZON_DAYS от письма
+                    # (защита от опечаток в месяце), уже прошедшие — принимаем как есть
                     ends = [_d(x) for pair in pairs for x in pair
-                            if 0 <= (_d(x) - ld).days <= SLOT_MAX_HORIZON_DAYS]
+                            if (_d(x) - ld).days >= 0
+                            and (_d(x) <= today or (_d(x) - ld).days <= SLOT_MAX_HORIZON_DAYS)]
                     if ends:
                         slot_ends.setdefault(ld, []).append(max(ends))
                 except (ValueError, TypeError):
