@@ -15,7 +15,8 @@ from aiogram.filters import Command, CommandObject, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from src import db, stats
-from src.report_flow import CHAT_ID, VISA_TYPES, _retire_invite, admin_ids, fmt, post_link, row_author, user_label
+from src.report_flow import (CHAT_ID, VISA_TYPES, _retire_invite, _update_invite, admin_ids, build_post_text_from_row,
+                             fmt, post_kb, post_link, row_author, row_to_data, user_label)
 
 log = logging.getLogger("admin")
 router = Router()
@@ -170,7 +171,7 @@ def _who_card(r) -> str:
     if r["anon"]:
         flags.append("🙈 ник скрыт")
     if r["suspect"]:
-        flags.append("⚠️ сомнительная")
+        flags.append("⚠️ сомнительная: " + SUSPECT_LABELS.get(r["suspect_reason"] or "short", "иное"))
     created = r["created_at"][:10]
     lines = [
         f"<b>Анкета #{r['id']}</b> · {r['city']} · {VISA_TYPES.get(r['visa_type'], r['visa_type'])}",
@@ -182,6 +183,69 @@ def _who_card(r) -> str:
     if r["message_id"]:
         lines.append(f'<a href="{post_link(r["message_id"])}">👀 пост анкеты</a>')
     return "\n".join(lines)
+
+
+SUSPECT_LABELS = {"jump": "мимо очереди", "short": "короткий срок", "admin": "иное (админ)"}
+
+
+def _who_kb(r) -> InlineKeyboardMarkup:
+    """Пометить сомнительной с причиной / снять пометку — в любой момент из карточки /who."""
+    rid = r["id"]
+    if r["suspect"]:
+        rows = [[InlineKeyboardButton(text="✅ Снять пометку «сомнительная»", callback_data=f"whos:{rid}:clear")]]
+    else:
+        rows = [
+            [InlineKeyboardButton(text="⚠️ Сомнительная: мимо очереди", callback_data=f"whos:{rid}:jump")],
+            [InlineKeyboardButton(text="⚠️ Сомнительная: короткий срок", callback_data=f"whos:{rid}:short")],
+            [InlineKeyboardButton(text="⚠️ Сомнительная: иное", callback_data=f"whos:{rid}:admin")],
+        ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _redraw_public(bot, row) -> str:
+    """Перерисовать пост анкеты в теме и запись в ленте приглашений по текущей строке БД."""
+    how = "поста нет"
+    if row["message_id"]:
+        text, city, visa = build_post_text_from_row(row)
+        me = await bot.me()
+        try:
+            await bot.edit_message_text(chat_id=CHAT_ID, message_id=row["message_id"], text=text,
+                                        reply_markup=post_kb(me.username, city, visa))
+            how = "пост обновлён"
+        except TelegramBadRequest as e:
+            how = "пост без изменений" if "not modified" in e.message else f"пост не изменён ({e.message})"
+    if row["invite_msg_id"] and row["letter_date"]:
+        await _update_invite(bot, row["invite_msg_id"], row_to_data(row), row["username"], "без ника",
+                             row["message_id"])
+        how += ", лента обновлена"
+    return how
+
+
+@router.callback_query(F.data.startswith("whos:"))
+async def who_suspect(callback: CallbackQuery) -> None:
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Кнопка только для администратора.", show_alert=True)
+        return
+    _, rid, action = callback.data.split(":", 2)
+    rid = int(rid)
+    row = db.get_report(rid)
+    if row is None:
+        await callback.message.edit_text(callback.message.html_text + "\n\n<i>анкета уже удалена</i>")
+        await callback.answer()
+        return
+    if action == "clear":
+        db.set_suspect(rid, 0)
+        verdict = "✅ пометка снята"
+    else:
+        db.set_suspect(rid, 1, action)
+        verdict = f"⚠️ помечена: {SUSPECT_LABELS.get(action, action)}"
+    row = db.get_report(rid)
+    how = await _redraw_public(callback.bot, row)
+    stats.note_write(row["city"], row["visa_type"])
+    log.info("admin /who: анкета %s — %s (%s)", rid, verdict, how)
+    await callback.message.edit_text(_who_card(row) + f"\n\n<b>{verdict}</b> · {how}",
+                                     reply_markup=_who_kb(row), disable_web_page_preview=True)
+    await callback.answer("Готово")
 
 
 @router.message(Command("who"))
@@ -205,6 +269,6 @@ async def cmd_who(message: Message, command: CommandObject) -> None:
             await message.answer(f"Анкет с ником {arg} не нашёл. Ник хранится на момент последней правки анкеты.")
             return
     for r in rows[:10]:
-        await message.answer(_who_card(r), disable_web_page_preview=True)
+        await message.answer(_who_card(r), reply_markup=_who_kb(r), disable_web_page_preview=True)
     if len(rows) > 10:
         await message.answer(f"…и ещё {len(rows) - 10}.")

@@ -210,7 +210,7 @@ async def main() -> None:
     from src.report_flow import admin_ids
     admin_cmds = commands + [
         BotCommand(command="stale", description="Админ: анкеты позади фронта (вышли; online [мес] — в чате)"),
-        BotCommand(command="who", description="Админ: автор анкеты по номеру или нику"),
+        BotCommand(command="who", description="Админ: анкета по номеру или нику — автор, пометка «сомнительная»"),
     ]
     for aid in admin_ids():  # админские команды видны только в личках администраторов
         try:
