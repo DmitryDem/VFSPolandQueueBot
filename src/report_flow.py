@@ -1715,8 +1715,9 @@ async def _apply_edit(callback: CallbackQuery, data: dict, editing_id: int) -> N
     except (KeyError, IndexError):
         inv_msg = None
     if data.get("letter_date"):
-        if not already_announced:
-            # письмо появилось только сейчас — первая публикация в ленту
+        # письмо появилось только сейчас (или флаг анонса стоит без записи в ленте — так было
+        # у старых анкет после запуска ленты) — первая публикация в ленту
+        if not already_announced or (not old["letter_date"] and not inv_msg):
             await _announce_invite(
                 callback.bot, editing_id, data, user.username, user.first_name, final_message_id
             )
