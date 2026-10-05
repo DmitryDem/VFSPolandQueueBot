@@ -344,11 +344,19 @@ JUMP_NOTE = (
 )
 
 
+ADMIN_NOTE = (
+    "⚠️ <i>Отмечено администратором как сомнительное: данные анкеты не удалось подтвердить. "
+    "В статистике и прогнозах не учитывается.</i>"
+)
+
+
 def suspect_note(d: dict) -> str:
     """Текст пометки по причине: ранняя дата = точная ошибка; 'jump' = мимо очереди;
-    иначе — аномально короткий срок."""
+    'admin' = ручная пометка; иначе — аномально короткий срок."""
     if d.get("suspect_reason") == "jump":
         return JUMP_NOTE
+    if d.get("suspect_reason") == "admin":
+        return ADMIN_NOTE
     try:
         if datetime.strptime(d["queue_date"], "%Y-%m-%d").date() < QUEUE_START:
             return ERROR_NOTE
