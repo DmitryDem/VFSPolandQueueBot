@@ -398,6 +398,28 @@ def build_text(s: Stats, visa_label: str, today: date | None = None) -> str:
             f"🔮 С учётом ещё ждущих (Каплан–Майер): письмо ≈ <b>{_fmt(eta_km)}</b> "
             f"(~{km} дн.)"
         )
+    ff = front_forecast(s.city, s.visa_type, today, None, today)
+    if ff.front is not None and ff.status != "nodata":
+        fr = _fmt_front(ff.front, ff.speed)
+        if ff.status == "stalled":
+            lines.append(
+                f"🚀 По скорости очереди: фронт стоит на <b>{fr}</b> уже ~{ff.stalled_weeks} нед. — "
+                "прогноз этим методом пока невозможен."
+            )
+        elif ff.status == "passed":
+            lines.append(f"🚀 По скорости очереди: приглашения уже дошли до <b>{fr}</b> — до сегодняшнего дня.")
+        else:
+            left = (ff.eta - today).days
+            if left > 365:
+                tail = "<b>более года</b>"
+            elif left > FRONT_MAX_DAYS:
+                tail = "<b>более полугода</b>"
+            else:
+                tail = f"≈ <b>{_fmt(ff.eta)}</b> (~{left} дн.)"
+            lines.append(
+                f"🚀 По скорости очереди: фронт <b>{fr}</b>, {_fmt_speed(ff.speed)} → "
+                f"вставшим сегодня письмо {tail}"
+            )
 
     footer = f"<i>Срез {_fmt(today)} · за 7 дней +{s.recent_7d} анкет"
     if s.suspect_count:
