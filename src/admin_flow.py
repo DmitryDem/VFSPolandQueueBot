@@ -139,26 +139,33 @@ async def stale_action(callback: CallbackQuery) -> None:
         await callback.message.edit_text(base + "\n\n<b>⛔ У анкеты появилось письмо — не удаляю.</b>")
         await callback.answer()
         return
+    how = await _delete_anketa(callback.bot, row, "stale")
+    await callback.message.edit_text(base + f"\n\n<b>Решение:</b> 🗑 удалена ({how})")
+    await callback.answer("Удалено")
+
+
+async def _delete_anketa(bot, row, source: str) -> str:
+    """Удаление анкеты админом: пост в теме (delete или заглушка, если старше 48 ч),
+    запись в ленте приглашений, строка БД, кеш статистики. Возвращает, что стало с постом."""
     how = "поста не было"
     if row["message_id"]:
         try:
-            await callback.bot.delete_message(CHAT_ID, row["message_id"])
+            await bot.delete_message(CHAT_ID, row["message_id"])
             how = "пост удалён"
         except TelegramBadRequest:
             try:  # старше 48 ч — Telegram не даёт удалить, ставим заглушку без кнопок
-                await callback.bot.edit_message_text(
+                await bot.edit_message_text(
                     chat_id=CHAT_ID, message_id=row["message_id"], text=TOMBSTONE,
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[]),
                 )
                 how = "пост заменён заглушкой"
             except TelegramBadRequest as e:
                 how = f"пост не изменён ({e.message})"
-    await _retire_invite(callback.bot, row)
-    db.delete_report(rid)
+    await _retire_invite(bot, row)
+    db.delete_report(row["id"])
     stats.note_write(row["city"], row["visa_type"])
-    log.info("admin /stale: удалена анкета %s (%s/%s), %s", rid, row["city"], row["visa_type"], how)
-    await callback.message.edit_text(base + f"\n\n<b>Решение:</b> 🗑 удалена ({how})")
-    await callback.answer("Удалено")
+    log.info("admin /%s: удалена анкета %s (%s/%s), %s", source, row["id"], row["city"], row["visa_type"], how)
+    return how
 
 
 # ---------- /who: кто автор анкеты (в т.ч. анонимной) ----------
@@ -199,7 +206,45 @@ def _who_kb(r) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⚠️ Сомнительная: короткий срок", callback_data=f"whos:{rid}:short")],
             [InlineKeyboardButton(text="⚠️ Сомнительная: иное", callback_data=f"whos:{rid}:admin")],
         ]
+    rows.append([InlineKeyboardButton(text="🗑 Удалить анкету", callback_data=f"whodel:{rid}:ask")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.callback_query(F.data.startswith("whodel:"))
+async def who_delete(callback: CallbackQuery) -> None:
+    """Удаление из карточки /who: сначала подтверждение, затем тот же флоу, что в /stale."""
+    if not _is_admin(callback.from_user.id):
+        await callback.answer("Кнопка только для администратора.", show_alert=True)
+        return
+    _, rid, step = callback.data.split(":", 2)
+    rid = int(rid)
+    row = db.get_report(rid)
+    if row is None:
+        await callback.message.edit_text(_strip_tail(callback.message.html_text) + "\n\n<i>анкета уже удалена</i>")
+        await callback.answer()
+        return
+    card = _who_card(row)
+    if step == "ask":
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, удалить безвозвратно", callback_data=f"whodel:{rid}:yes")],
+            [InlineKeyboardButton(text="↩️ Отмена", callback_data=f"whodel:{rid}:no")],
+        ])
+        letter = " У анкеты есть письмо — оно уйдёт из статистики." if row["letter_date"] else ""
+        await callback.message.edit_text(
+            card + f"\n\n<b>Удалить анкету #{rid}?</b> Пост в теме и запись в ленте тоже будут убраны.{letter}",
+            reply_markup=kb, disable_web_page_preview=True,
+        )
+    elif step == "no":
+        await callback.message.edit_text(card, reply_markup=_who_kb(row), disable_web_page_preview=True)
+    else:
+        how = await _delete_anketa(callback.bot, row, "who")
+        await callback.message.edit_text(card + f"\n\n<b>🗑 Удалена</b> · {how}", disable_web_page_preview=True)
+    await callback.answer()
+
+
+def _strip_tail(html: str) -> str:
+    """Карточка без приписок-решений (всё после пустой строки-разделителя)."""
+    return html.split("\n\n")[0]
 
 
 async def _redraw_public(bot, row) -> str:
