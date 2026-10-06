@@ -403,11 +403,11 @@ def build_text(s: Stats, visa_label: str, today: date | None = None) -> str:
         fr = _fmt_front(ff.front, ff.speed)
         if ff.status == "stalled":
             lines.append(
-                f"🚀 По скорости очереди: фронт стоит на <b>{fr}</b> уже ~{ff.stalled_weeks} нед. — "
+                f"🏁 По скорости очереди: фронт стоит на <b>{fr}</b> уже ~{ff.stalled_weeks} нед. — "
                 "прогноз этим методом пока невозможен."
             )
         elif ff.status == "passed":
-            lines.append(f"🚀 По скорости очереди: приглашения уже дошли до <b>{fr}</b> — до сегодняшнего дня.")
+            lines.append(f"🏁 По скорости очереди: приглашения уже дошли до <b>{fr}</b> — до сегодняшнего дня.")
         else:
             left = (ff.eta - today).days
             if left > 365:
@@ -417,7 +417,7 @@ def build_text(s: Stats, visa_label: str, today: date | None = None) -> str:
             else:
                 tail = f"≈ <b>{_fmt(ff.eta)}</b> (~{left} дн.)"
             lines.append(
-                f"🚀 По скорости очереди: фронт <b>{fr}</b>, {_fmt_speed(ff.speed)} → "
+                f"🏁 По скорости очереди: фронт <b>{fr}</b>, {_fmt_speed(ff.speed)} → "
                 f"вставшим сегодня письмо {tail}"
             )
 
