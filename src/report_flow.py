@@ -1574,6 +1574,8 @@ def _invite_text_kb(data: dict, username: str | None, first_name: str, message_i
     ]
     if data.get("queue_num"):
         lines.append(f"🔢 Номер очереди: PLB {data['queue_num']}…")
+    if data.get("slots"):
+        lines.append(f"📆 Доступные даты записи: {fmt_slots(data['slots'])}")
     lines.append(f"👤 {user_label(username, first_name or 'без ника', bool(data.get('anon')), data.get('report_id'))}")
     kb = None
     if message_id:
