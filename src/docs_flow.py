@@ -18,6 +18,7 @@ FAQ_PATH = Path(__file__).resolve().parent.parent / "config" / "faq.json"
 MENU = [
     ("FAQ", "❓ Частые вопросы"),
     ("D_WORK", "📄 D (работа)"),
+    ("D_CHILD", "👶 D (ребёнок к родителю)"),
     ("D_DRIVER", "📄 D (водители)"),
     ("D_STUDENT", "📄 D (учёба)"),
     ("D_KARTA", "📄 D (Карта поляка)"),
