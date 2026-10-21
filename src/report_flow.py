@@ -348,6 +348,11 @@ ADMIN_NOTE = (
     "⚠️ <i>Отмечено администратором как сомнительное: данные анкеты не удалось подтвердить. "
     "В статистике и прогнозах не учитывается.</i>"
 )
+EARLY_NOTE = (
+    "ℹ️ <i>Приглашение пришло раньше общей очереди. Чтобы не искажать прогноз остальным, "
+    "анкета временно не учитывается в статистике и вернётся в неё автоматически, "
+    "когда очередь дойдёт до её даты постановки.</i>"
+)
 
 
 def suspect_note(d: dict) -> str:
@@ -357,6 +362,8 @@ def suspect_note(d: dict) -> str:
         return JUMP_NOTE
     if d.get("suspect_reason") == "admin":
         return ADMIN_NOTE
+    if d.get("suspect_reason") == "early":
+        return EARLY_NOTE
     try:
         if datetime.strptime(d["queue_date"], "%Y-%m-%d").date() < QUEUE_START:
             return ERROR_NOTE

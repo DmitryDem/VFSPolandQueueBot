@@ -15,7 +15,8 @@ from aiogram.types import (
 )
 from dotenv import load_dotenv
 
-from src import stats
+from src import db, stats
+from src.admin_flow import _redraw_public
 from src.admin_flow import router as admin_router
 from src.browse_flow import router as browse_router
 from src.captcha import router as captcha_router
@@ -81,6 +82,10 @@ async def daily_summary_loop(bot: Bot) -> None:
             target += timedelta(days=1)
         await asyncio.sleep((target - now).total_seconds())
         try:
+            await release_early_marks(bot)
+        except Exception:
+            log.exception("Ошибка автоснятия пометок «вне очереди»")
+        try:
             text = stats.build_daily_summary(CITIES, VISA_TYPES)
             if not text:
                 log.info("Ежедневная сводка пропущена: данных нет")
@@ -99,6 +104,31 @@ async def daily_summary_loop(bot: Bot) -> None:
             log.info("Ежедневная сводка опубликована%s", " (+канал)" if channel_id else "")
         except Exception:
             log.exception("Ошибка публикации ежедневной сводки")
+
+
+async def release_early_marks(bot: Bot) -> None:
+    """Снимает пометку «вне очереди» с анкет, до которых фронт очереди уже дошёл:
+    они снова учитываются в статистике, пост и лента перерисовываются."""
+    rows = db.early_caught_up()
+    if not rows:
+        return
+    lines = []
+    for r in rows:
+        db.set_suspect(r["id"], 0)
+        row = db.get_report(r["id"])
+        how = await _redraw_public(bot, row)
+        stats.invalidate(row["city"], row["visa_type"])
+        log.info("«вне очереди» снята: анкета %s (%s %s, постановка %s, фронт %s) — %s",
+                 r["id"], r["city"], r["visa_type"], r["queue_date"], r["front"], how)
+        lines.append(f"#{r['id']} · {r['city']} · {VISA_TYPES.get(r['visa_type'], r['visa_type'])} · "
+                     f"постановка {r['queue_date']} · фронт {r['front']}")
+    admin = os.environ.get("ADMIN_CHAT_ID")
+    if admin:
+        try:
+            await bot.send_message(int(admin), "ℹ️ <b>Фронт дошёл — пометка «вне очереди» снята:</b>\n"
+                                   + "\n".join(lines))
+        except TelegramBadRequest:
+            log.warning("Не удалось уведомить админа об автоснятии пометок")
 
 
 async def membership_refresh_loop(bot: Bot) -> None:

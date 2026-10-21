@@ -417,6 +417,22 @@ def pending_behind_front() -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def early_caught_up() -> list[sqlite3.Row]:
+    """Анкеты с пометкой «вне очереди» (suspect_reason='early'), чью дату постановки фронт
+    города×визы (макс. постановка среди учитываемых получивших письмо) уже догнал —
+    их пора вернуть в статистику."""
+    with _connect() as conn:
+        return conn.execute(
+            """SELECT r.*, f.front FROM reports r
+               JOIN (SELECT city, visa_type, MAX(queue_date) AS front FROM reports
+                     WHERE letter_date IS NOT NULL AND COALESCE(suspect, 0) = 0
+                     GROUP BY city, visa_type) f
+                 ON f.city = r.city AND f.visa_type = r.visa_type
+               WHERE r.suspect = 1 AND r.suspect_reason = 'early' AND r.queue_date <= f.front
+               ORDER BY r.city, r.visa_type, r.queue_date"""
+        ).fetchall()
+
+
 def visa_days_for(visa_type: str) -> list[int]:
     """Сроки выданных виз (дни) по типу визы, все города; без сомнительных и отказов."""
     with _connect() as conn:

@@ -177,7 +177,9 @@ def _who_card(r) -> str:
     flags = []
     if r["anon"]:
         flags.append("🙈 ник скрыт")
-    if r["suspect"]:
+    if r["suspect"] and r["suspect_reason"] == "early":
+        flags.append("ℹ️ вне очереди (до фронта не учитывается)")
+    elif r["suspect"]:
         flags.append("⚠️ сомнительная: " + SUSPECT_LABELS.get(r["suspect_reason"] or "short", "иное"))
     created = r["created_at"][:10]
     lines = [
@@ -192,16 +194,19 @@ def _who_card(r) -> str:
     return "\n".join(lines)
 
 
-SUSPECT_LABELS = {"jump": "мимо очереди", "short": "короткий срок", "admin": "иное (админ)"}
+SUSPECT_LABELS = {"jump": "мимо очереди", "short": "короткий срок", "admin": "иное (админ)",
+                  "early": "вне очереди (без вины автора)"}
 
 
 def _who_kb(r) -> InlineKeyboardMarkup:
     """Пометить сомнительной с причиной / снять пометку — в любой момент из карточки /who."""
     rid = r["id"]
     if r["suspect"]:
-        rows = [[InlineKeyboardButton(text="✅ Снять пометку «сомнительная»", callback_data=f"whos:{rid}:clear")]]
+        label = "✅ Снять пометку «вне очереди»" if r["suspect_reason"] == "early" else "✅ Снять пометку «сомнительная»"
+        rows = [[InlineKeyboardButton(text=label, callback_data=f"whos:{rid}:clear")]]
     else:
         rows = [
+            [InlineKeyboardButton(text="ℹ️ Вне очереди (без вины автора)", callback_data=f"whos:{rid}:early")],
             [InlineKeyboardButton(text="⚠️ Сомнительная: мимо очереди", callback_data=f"whos:{rid}:jump")],
             [InlineKeyboardButton(text="⚠️ Сомнительная: короткий срок", callback_data=f"whos:{rid}:short")],
             [InlineKeyboardButton(text="⚠️ Сомнительная: иное", callback_data=f"whos:{rid}:admin")],
@@ -281,6 +286,12 @@ async def who_suspect(callback: CallbackQuery) -> None:
     if action == "clear":
         db.set_suspect(rid, 0)
         verdict = "✅ пометка снята"
+    elif action == "early":
+        if not row["letter_date"]:
+            await callback.answer("«Вне очереди» — только для анкет с полученным письмом.", show_alert=True)
+            return
+        db.set_suspect(rid, 1, action)
+        verdict = "ℹ️ помечена: вне очереди — вернётся в статистику, когда фронт дойдёт до неё"
     else:
         db.set_suspect(rid, 1, action)
         verdict = f"⚠️ помечена: {SUSPECT_LABELS.get(action, action)}"
