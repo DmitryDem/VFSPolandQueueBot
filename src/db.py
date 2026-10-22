@@ -418,17 +418,27 @@ def pending_behind_front() -> list[sqlite3.Row]:
 
 
 def early_caught_up() -> list[sqlite3.Row]:
-    """Анкеты с пометкой «вне очереди» (suspect_reason='early'), чью дату постановки фронт
-    города×визы (макс. постановка среди учитываемых получивших письмо) уже догнал —
-    их пора вернуть в статистику."""
+    """Анкеты с пометкой «вне очереди» (suspect_reason='early'), до которых очередь дошла:
+    в их городе×визе не осталось ни одной учитываемой анкеты без письма (автор в группе),
+    вставшей раньше. Фронт здесь — хвост отставших, а не макс. постановка получивших письмо:
+    иначе одна непомеченная «внеочередная» анкета снимала бы пометки со всех остальных.
+    Поле `front` — самая ранняя постановка среди ещё ждущих (NULL = ждущих нет)."""
     with _connect() as conn:
         return conn.execute(
-            """SELECT r.*, f.front FROM reports r
-               JOIN (SELECT city, visa_type, MAX(queue_date) AS front FROM reports
-                     WHERE letter_date IS NOT NULL AND COALESCE(suspect, 0) = 0
-                     GROUP BY city, visa_type) f
-                 ON f.city = r.city AND f.visa_type = r.visa_type
-               WHERE r.suspect = 1 AND r.suspect_reason = 'early' AND r.queue_date <= f.front
+            """SELECT r.*,
+                      (SELECT MIN(w.queue_date) FROM reports w
+                       LEFT JOIN membership m ON m.user_id = w.user_id
+                       WHERE w.city = r.city AND w.visa_type = r.visa_type
+                         AND w.letter_date IS NULL AND COALESCE(w.suspect, 0) = 0
+                         AND COALESCE(m.in_group, 1) = 1) AS front
+               FROM reports r
+               WHERE r.suspect = 1 AND r.suspect_reason = 'early'
+                 AND NOT EXISTS (SELECT 1 FROM reports w
+                                 LEFT JOIN membership m ON m.user_id = w.user_id
+                                 WHERE w.city = r.city AND w.visa_type = r.visa_type
+                                   AND w.letter_date IS NULL AND COALESCE(w.suspect, 0) = 0
+                                   AND COALESCE(m.in_group, 1) = 1
+                                   AND w.queue_date < r.queue_date)
                ORDER BY r.city, r.visa_type, r.queue_date"""
         ).fetchall()
 

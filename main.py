@@ -121,7 +121,7 @@ async def release_early_marks(bot: Bot) -> None:
         log.info("«вне очереди» снята: анкета %s (%s %s, постановка %s, фронт %s) — %s",
                  r["id"], r["city"], r["visa_type"], r["queue_date"], r["front"], how)
         lines.append(f"#{r['id']} · {r['city']} · {VISA_TYPES.get(r['visa_type'], r['visa_type'])} · "
-                     f"постановка {r['queue_date']} · фронт {r['front']}")
+                     f"постановка {r['queue_date']} · ждущих раньше нет (хвост {r['front'] or '—'})")
     admin = os.environ.get("ADMIN_CHAT_ID")
     if admin:
         try:
