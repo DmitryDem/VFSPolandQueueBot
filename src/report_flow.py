@@ -529,7 +529,7 @@ async def ask_queue_time(message: Message, state: FSMContext, edit: bool = False
     await _render(
         message,
         f"Во сколько вы встали в очередь {fmt(data['queue_date'])}?\n"
-        "Введите время в формате <b>ЧЧ:ММ</b>, например 09:15.\n"
+        "✍️ Напишите время сообщением в поле ввода внизу, например <b>09:15</b>, или нажмите «Не помню».\n"
         "Это помогает понять позицию внутри дня, когда очередь долго стоит на одной дате.",
         _kb(*rows),
         edit,
@@ -1104,7 +1104,7 @@ async def queue_time_none(callback: CallbackQuery, state: FSMContext) -> None:
 async def input_queue_time(message: Message, state: FSMContext) -> None:
     t = parse_time(message.text)
     if t is None:
-        await message.answer("Не понял время. Формат: ЧЧ:ММ, например 09:15 — или нажмите «пропустить».")
+        await message.answer("Не понял время. Напишите его сообщением в формате ЧЧ:ММ, например 09:15, или нажмите «Не помню / пропустить».")
         return
     await state.update_data(queue_time=t)
     await ask_queue_num(message, state)
