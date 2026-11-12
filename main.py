@@ -226,12 +226,12 @@ async def main() -> None:
     commands = [
         BotCommand(command="report", description="Заполнить/дополнить анкету"),
         BotCommand(command="mine", description="Моя анкета"),
-        BotCommand(command="near", description="Люди рядом в очереди"),
         BotCommand(command="queue", description="Очередь города по порядку постановки"),
         BotCommand(command="stats", description="Статистика и прогноз очереди"),
+        BotCommand(command="my", description="Персональный прогноз по вашей дате"),
+        BotCommand(command="near", description="Люди рядом в очереди"),
         BotCommand(command="wait", description="Сроки ожидания приглашения (графики)"),
         BotCommand(command="terms", description="На какой срок выдают визы"),
-        BotCommand(command="my", description="Персональный прогноз по вашей дате"),
         BotCommand(command="docs", description="Документы, сборы, порядок подачи"),
         BotCommand(command="cancel", description="Отменить текущую анкету"),
     ]
