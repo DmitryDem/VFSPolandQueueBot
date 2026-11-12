@@ -350,6 +350,25 @@ def reports_by_city_visa(city: str, visa_type: str, offset: int, limit: int) -> 
         ).fetchall()
 
 
+def queue_front_pos(city: str, visa_type: str) -> int | None:
+    """Позиция (с нуля) фронта приглашений в очереди по постановке — последняя по порядку
+    постановки анкета с письмом без пометки «сомнительная»/«вне очереди» (тот же критерий,
+    что фронт в сводке). None — писем в категории ещё нет.
+
+    Порядок тот же, что в reports_by_city_visa, поэтому позиция = offset строки на странице.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            """WITH q AS (
+                   SELECT letter_date, COALESCE(suspect, 0) AS suspect,
+                          ROW_NUMBER() OVER (ORDER BY queue_date, COALESCE(queue_time, '99:99'), id) - 1 AS pos
+                   FROM reports WHERE city = ? AND visa_type = ?)
+               SELECT MAX(pos) FROM q WHERE letter_date IS NOT NULL AND suspect = 0""",
+            (city, visa_type),
+        ).fetchone()
+        return row[0] if row and row[0] is not None else None
+
+
 def reports_for_survival() -> list[sqlite3.Row]:
     """Данные для анализа выживаемости: (user_id, city, visa_type, queue_date, letter_date, suspect)."""
     with _connect() as conn:

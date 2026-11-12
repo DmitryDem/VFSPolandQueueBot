@@ -151,6 +151,7 @@ async def list_page(callback: CallbackQuery) -> None:
 # ---------- /queue: очередь города в порядке постановки ----------
 
 QUEUE_PAGE = 15
+FRONT_CONTEXT = 4  # сколько анкет с письмом показать над фронтом на стартовой странице
 
 
 def _queue_status(row) -> str:
@@ -198,21 +199,33 @@ def _queue_visa_kb(city: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _queue_start(city: str, visa: str) -> int:
+    """Offset стартовой страницы: фронт приглашений с несколькими анкетами с письмом над ним."""
+    front = db.queue_front_pos(city, visa)
+    return 0 if front is None else max(0, front - FRONT_CONTEXT)
+
+
 async def _render_queue(message: Message, city: str, visa: str, offset: int, edit: bool) -> None:
     rows = db.reports_by_city_visa(city, visa, offset, QUEUE_PAGE)
     total = db.count_reports(city, visa)
+    front = db.queue_front_pos(city, visa)
     label = VISA_TYPES[visa]
     if total == 0:
         text = f"📜 <b>{city} — {label}</b>\nОчередь по постановке\n\nАнкет пока нет."
     else:
         lines = [f"📜 <b>{city} — {label}</b> · очередь по постановке · анкет: {total}", ""]
-        lines += [_fmt_queue_row(r, offset + i + 1) for i, r in enumerate(rows)]
+        for i, r in enumerate(rows):
+            lines.append(_fmt_queue_row(r, offset + i + 1))
+            if front is not None and offset + i == front and offset + i + 1 < total:
+                lines.append("— — — ⬆️ приглашения дошли · ⬇️ ждут — — —")
         lines.append("")
         lines.append("<i>№ по дате постановки · ✉️ дата письма-приглашения в ВЦ "
                      "(⏳ ждёт — письма ещё нет); дата постановки — ссылка на публикацию</i>")
         text = "\n".join(lines)
 
     nav = []
+    if offset > QUEUE_PAGE:
+        nav.append(InlineKeyboardButton(text="⏮ В начало", callback_data=f"qpage:{city}:{visa}:0"))
     if offset > 0:
         nav.append(InlineKeyboardButton(
             text="◀️ Назад", callback_data=f"qpage:{city}:{visa}:{max(0, offset - QUEUE_PAGE)}"))
@@ -252,7 +265,8 @@ async def queue_deeplink(message: Message, command: CommandObject, state: FSMCon
     await state.clear()
     parts = (command.args or "").split("_", 2)
     if len(parts) == 3 and parts[1].isdigit() and int(parts[1]) < len(CITIES) and parts[2] in VISA_TYPES:
-        await _render_queue(message, CITIES[int(parts[1])], parts[2], 0, edit=False)
+        city, visa = CITIES[int(parts[1])], parts[2]
+        await _render_queue(message, city, visa, _queue_start(city, visa), edit=False)
     else:
         await message.answer(
             "Не понял ссылку. Очередь по постановке — /queue",
@@ -308,7 +322,7 @@ async def queue_pick_visa(callback: CallbackQuery) -> None:
     if city not in CITIES or visa not in VISA_TYPES:
         await callback.answer("Неизвестная комбинация", show_alert=True)
         return
-    await _render_queue(callback.message, city, visa, 0, edit=True)
+    await _render_queue(callback.message, city, visa, _queue_start(city, visa), edit=True)
     await callback.answer()
 
 
