@@ -216,6 +216,11 @@ def back_btn(target: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text=BACK, callback_data=f"back:{target}")
 
 
+def today_btn(step: str) -> list[InlineKeyboardButton]:
+    """Кнопка «Сегодня» для шагов с датой: проходит те же проверки, что и ввод текстом."""
+    return [InlineKeyboardButton(text="📅 Сегодня", callback_data=f"today:{step}")]
+
+
 def city_kb() -> InlineKeyboardMarkup:
     rows, row = [], []
     for city in CITIES:
@@ -500,12 +505,14 @@ async def ask_queue_date(message: Message, state: FSMContext, edit: bool = False
     rows = []
     if data.get("queue_date"):
         rows.append(keep_btn("queue", fmt(data["queue_date"])))
+    rows.append(today_btn("queue"))
     rows.append([back_btn("visa")])
     await _render(
         message,
         f"Город: <b>{data['city']}</b>\n"
         f"Тип визы: <b>{VISA_TYPES[data['visa_type']]}</b>\n\n"
-        "Когда вы встали в очередь VFS?\nВведите дату в формате <b>ДД.ММ.ГГГГ</b>, например 15.03.2026",
+        "Когда вы встали в очередь VFS?\n"
+        "✍️ Напишите дату сообщением в поле ввода внизу, например <b>15.03.2026</b> — или нажмите «Сегодня», если встали сегодня.",
         _kb(*rows),
         edit,
     )
@@ -556,12 +563,13 @@ async def ask_letter_date(message: Message, state: FSMContext, edit: bool = Fals
     rows = []
     if data.get("letter_date"):
         rows.append(keep_btn("letter", fmt(data["letter_date"])))
+    rows.append(today_btn("letter"))
     rows.append([InlineKeyboardButton(text="📭 Письмо ещё не пришло", callback_data="letter:none")])
     rows.append([back_btn("qnum")])
     await _render(
         message,
         "Когда на почту пришло письмо с приглашением записаться в визовый центр?\n"
-        "Введите дату (ДД.ММ.ГГГГ) или нажмите кнопку, если письма ещё нет.",
+        "✍️ Напишите дату сообщением в поле ввода внизу, например <b>15.03.2026</b> — или нажмите кнопку, если письмо пришло сегодня или его ещё нет.",
         _kb(*rows),
         edit,
     )
@@ -593,12 +601,13 @@ async def ask_submit_date(message: Message, state: FSMContext, edit: bool = Fals
     rows = []
     if data.get("submit_date"):
         rows.append(keep_btn("submit", fmt(data["submit_date"])))
+    rows.append(today_btn("submit"))
     rows.append([InlineKeyboardButton(text="📄 Ещё не подавал(а)", callback_data="submit:none")])
     rows.append([back_btn("slots")])
     await _render(
         message,
         "Когда вы подали документы в визовый центр?\n"
-        "Введите дату (ДД.ММ.ГГГГ) или нажмите кнопку, если подача ещё впереди.",
+        "✍️ Напишите дату сообщением в поле ввода внизу, например <b>15.03.2026</b> — или нажмите кнопку, если подали сегодня или подача ещё впереди.",
         _kb(*rows),
         edit,
     )
@@ -610,12 +619,13 @@ async def ask_passport_date(message: Message, state: FSMContext, edit: bool = Fa
     rows = []
     if data.get("passport_date"):
         rows.append(keep_btn("passport", fmt(data["passport_date"])))
+    rows.append(today_btn("passport"))
     rows.append([InlineKeyboardButton(text="⏳ Паспорт ещё не вернули", callback_data="passport:none")])
     rows.append([back_btn("submit")])
     await _render(
         message,
         "Когда вы получили паспорт обратно?\n"
-        "Введите дату (ДД.ММ.ГГГГ) или нажмите кнопку, если паспорт ещё в визовом центре.",
+        "✍️ Напишите дату сообщением в поле ввода внизу, например <b>15.03.2026</b> — или нажмите кнопку, если получили сегодня или паспорт ещё в визовом центре.",
         _kb(*rows),
         edit,
     )
@@ -1061,8 +1071,14 @@ async def pick_visa(callback: CallbackQuery, state: FSMContext) -> None:
 async def input_queue_date(message: Message, state: FSMContext) -> None:
     d = parse_date(message.text)
     if d is None:
-        await message.answer("Не понял дату. Формат: ДД.ММ.ГГГГ, например 15.03.2026")
+        await message.answer("Не понял дату. Напишите её сообщением в формате ДД.ММ.ГГГГ, например 15.03.2026")
         return
+    await apply_queue_date(message, state, d, message.from_user.id)
+
+
+async def apply_queue_date(message: Message, state: FSMContext, d: date, user_id: int,
+                           edit: bool = False) -> None:
+    """Проверки и сохранение даты постановки — общие для ввода текстом и кнопки «Сегодня»."""
     if d > date.today():
         await message.answer("Дата постановки в очередь не может быть в будущем. Проверьте и введите ещё раз.")
         return
@@ -1073,8 +1089,8 @@ async def input_queue_date(message: Message, state: FSMContext) -> None:
         )
         return
     await state.update_data(queue_date=d.isoformat())
-    db.log_event(message.from_user.id, "queue_date")
-    await ask_queue_time(message, state)
+    db.log_event(user_id, "queue_date")
+    await ask_queue_time(message, state, edit=edit)
 
 
 @router.callback_query(Report.queue_time, F.data == "time:none")
@@ -1130,8 +1146,17 @@ async def letter_none(callback: CallbackQuery, state: FSMContext) -> None:
 async def input_letter_date(message: Message, state: FSMContext) -> None:
     d = parse_date(message.text)
     if d is None:
-        await message.answer("Не понял дату. Формат: ДД.ММ.ГГГГ, или нажмите кнопку «Письмо ещё не пришло».")
+        await message.answer(
+            "Не понял дату. Напишите её сообщением в формате ДД.ММ.ГГГГ, например 15.03.2026, "
+            "или нажмите кнопку «Письмо ещё не пришло»."
+        )
         return
+    await apply_letter_date(message, state, d, message.from_user.id)
+
+
+async def apply_letter_date(message: Message, state: FSMContext, d: date, user_id: int,
+                            edit: bool = False) -> None:
+    """Проверки, детекторы аномалий и сохранение даты письма — общие для текста и кнопки «Сегодня»."""
     data = await state.get_data()
     if d > date.today():
         await message.answer(
@@ -1175,8 +1200,8 @@ async def input_letter_date(message: Message, state: FSMContext) -> None:
         )
         return
     await state.update_data(letter_date=d.isoformat(), suspect_wait=False, suspect_reason=None)
-    db.log_event(message.from_user.id, "letter")
-    await ask_slots(message, state)
+    db.log_event(user_id, "letter")
+    await ask_slots(message, state, edit=edit)
 
 
 @router.callback_query(Report.letter_date, F.data == "sjump:ok")
@@ -1246,8 +1271,15 @@ async def submit_none(callback: CallbackQuery, state: FSMContext) -> None:
 async def input_submit_date(message: Message, state: FSMContext) -> None:
     d = parse_date(message.text)
     if d is None:
-        await message.answer("Не понял дату. Формат: ДД.ММ.ГГГГ, или кнопка «Ещё не подавал(а)».")
+        await message.answer(
+            "Не понял дату. Напишите её сообщением в формате ДД.ММ.ГГГГ, например 15.03.2026, "
+            "или нажмите кнопку «Ещё не подавал(а)»."
+        )
         return
+    await apply_submit_date(message, state, d)
+
+
+async def apply_submit_date(message: Message, state: FSMContext, d: date, edit: bool = False) -> None:
     data = await state.get_data()
     if d > date.today():
         await message.answer("Дата подачи в будущем — укажите фактическую дату или нажмите «Ещё не подавал(а)».")
@@ -1256,7 +1288,7 @@ async def input_submit_date(message: Message, state: FSMContext) -> None:
         await message.answer("Подача раньше письма-приглашения — так не бывает. Проверьте дату.")
         return
     await state.update_data(submit_date=d.isoformat())
-    await ask_passport_date(message, state)
+    await ask_passport_date(message, state, edit=edit)
 
 
 @router.callback_query(Report.passport_date, F.data == "passport:none")
@@ -1271,8 +1303,15 @@ async def passport_none(callback: CallbackQuery, state: FSMContext) -> None:
 async def input_passport_date(message: Message, state: FSMContext) -> None:
     d = parse_date(message.text)
     if d is None:
-        await message.answer("Не понял дату. Формат: ДД.ММ.ГГГГ, или кнопка «Паспорт ещё не вернули».")
+        await message.answer(
+            "Не понял дату. Напишите её сообщением в формате ДД.ММ.ГГГГ, например 15.03.2026, "
+            "или нажмите кнопку «Паспорт ещё не вернули»."
+        )
         return
+    await apply_passport_date(message, state, d)
+
+
+async def apply_passport_date(message: Message, state: FSMContext, d: date, edit: bool = False) -> None:
     data = await state.get_data()
     if d > date.today():
         await message.answer("Дата получения паспорта в будущем — проверьте и введите ещё раз.")
@@ -1281,7 +1320,31 @@ async def input_passport_date(message: Message, state: FSMContext) -> None:
         await message.answer("Паспорт вернули раньше подачи — так не бывает. Проверьте дату.")
         return
     await state.update_data(passport_date=d.isoformat())
-    await ask_outcome(message, state)
+    await ask_outcome(message, state, edit=edit)
+
+
+@router.callback_query(F.data.startswith("today:"))
+async def pick_today(callback: CallbackQuery, state: FSMContext) -> None:
+    """«Сегодня» на шаге с датой: та же логика, что при вводе текстом, вопрос редактируется на месте."""
+    step = callback.data.split(":", 1)[1]
+    expected = {
+        "queue": Report.queue_date, "letter": Report.letter_date,
+        "submit": Report.submit_date, "passport": Report.passport_date,
+    }
+    if step not in expected or await state.get_state() != expected[step].state:
+        await callback.answer("Кнопка устарела — отправьте /report заново", show_alert=True)
+        return
+    d = date.today()
+    uid = callback.from_user.id
+    if step == "queue":
+        await apply_queue_date(callback.message, state, d, uid, edit=True)
+    elif step == "letter":
+        await apply_letter_date(callback.message, state, d, uid, edit=True)
+    elif step == "submit":
+        await apply_submit_date(callback.message, state, d, edit=True)
+    else:
+        await apply_passport_date(callback.message, state, d, edit=True)
+    await callback.answer(d.strftime("%d.%m.%Y"))
 
 
 @router.callback_query(Report.outcome, F.data.startswith("outcome:"))
