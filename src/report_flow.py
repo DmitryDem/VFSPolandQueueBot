@@ -1557,11 +1557,12 @@ async def _notify_admin_suspect(bot, report_id: int, data: dict, user) -> None:
         await bot.send_message(
             chat_id=admin,
             text=(
-                f"⚠️ <b>Сомнительная анкета</b> ({why}; в статистике не учитывается)\n\n"
+                f"⚠️ <b>Сомнительная анкета #{report_id}</b> ({why}; в статистике не учитывается)\n\n"
                 f"🏙 {data['city']} · {VISA_TYPES[data['visa_type']]}\n"
                 f"👤 {user_label(user.username, user.first_name)} (id {user.id})\n"
                 f"⏳ Очередь: {fmt(data['queue_date'])} → 📬 письмо: {fmt(data['letter_date'])} "
-                f"= <b>{wait} дн.</b>"
+                f"= <b>{wait} дн.</b>\n\n"
+                f"🔎 Карточка и пометки: <code>/who {report_id}</code>"
             ),
             reply_markup=_kb(
                 [
